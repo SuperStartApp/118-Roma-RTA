@@ -62,7 +62,7 @@ export default function AgendaGiornaliera() {
           </div>
         </div>
 
-        {/* LISTA CORSE */}
+        {/* LISTA VELOCE */}
         {corse.length === 0 ? (
           <div className="bg-white p-10 rounded-3xl shadow-sm text-center text-gray-500 border border-gray-100">
             <div className="text-6xl mb-4">☕</div>
