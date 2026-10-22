@@ -1,11 +1,13 @@
 "use client";
 import React, { useEffect, useState } from 'react';
 import { supabase } from '@/app/lib/supabase';
-import Link from 'next/link'; // Importato per far funzionare il tasto Dettagli
+import Link from 'next/link';
 
 interface CorsaOggi {
   id: string;
   ora_appuntamento: string;
+  ora_inizio_effettiva: string | null;
+  ora_fine_effettiva: string | null;
   pazienti: { nome: string; cognome: string } | null;
   partenza_citta: string;
   arrivo_citta: string;
@@ -21,7 +23,6 @@ export default function AgendaGiornaliera() {
 
   async function fetchCorseOggi() {
     setLoading(true);
-    // Prende la data di oggi in formato YYYY-MM-DD
     const oggi = new Date().toISOString().split('T')[0]; 
     
     try {
@@ -34,7 +35,7 @@ export default function AgendaGiornaliera() {
       if (error) throw error;
       setCorse(data || []);
     } catch (error: any) {
-      console.error("Errore nel caricamento agenda:", error);
+      console.error("Errore agenda:", error);
     } finally {
       setLoading(false);
     }
@@ -70,37 +71,49 @@ export default function AgendaGiornaliera() {
           </div>
         ) : (
           <div className="space-y-4">
-            {corse.map((corsa) => (
-              <div 
-                key={corsa.id} 
-                className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-blue-500 flex items-center justify-between hover:shadow-md transition-all"
-              >
-                <div className="flex items-center space-x-6">
-                  {/* Ora */}
-                  <div className="text-2xl font-black text-blue-700 min-w-[100px]">
-                    {corsa.ora_appuntamento}
-                  </div>
-                  
-                  {/* Dati Paziente e Percorso */}
-                  <div>
-                    <div className="font-bold text-lg text-gray-800">
-                      {corsa.pazienti?.nome} {corsa.pazienti?.cognome || 'Sconosciuto'}
-                    </div>
-                    <div className="text-sm text-gray-500 flex items-center gap-1">
-                      <span>📍</span> {corsa.partenza_citta} <span className="mx-1">➡️</span> {corsa.arrivo_citta}
-                    </div>
-                  </div>
-                </div>
+            {corse.map((corsa) => {
+              // LOGICA STATO CORSA
+              const stato = !corsa.ora_inizio_effettiva ? 'In Attesa' : (!corsa.ora_fine_effettiva ? 'In Corso' : 'Completata');
+              const badgeColor = stato === 'Completata' ? 'bg-green-100 text-green-700' : (stato === 'In Corso' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-600');
 
-                {/* BOTTONE DETTAGLI - Ora collegato correttamente */}
-                <Link 
-                  href={`/prenotazioni/${corsa.id}`} 
-                  className="bg-gray-100 text-gray-600 px-5 py-2 rounded-xl text-sm font-bold hover:bg-blue-600 hover:text-white transition-colors"
+              return (
+                <div 
+                  key={corsa.id} 
+                  className="bg-white p-5 rounded-2xl shadow-sm border-l-8 border-blue-500 flex items-center justify-between hover:shadow-md transition-all"
                 >
-                  Dettagli
-                </Link>
-              </div>
-            ))}
+                  <div className="flex items-center space-x-6">
+                    {/* Ora */}
+                    <div className="text-2xl font-black text-blue-700 min-w-[100px]">
+                      {corsa.ora_appuntamento}
+                    </div>
+                    
+                    {/* Dati Paziente e Percorso */}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-lg text-gray-800">
+                          {corsa.pazienti?.nome} {corsa.pazienti?.cognome || 'Sconosciuto'}
+                        </span>
+                        {/* BADGE STATO AGGIUNTO QUI */}
+                        <span className={`${badgeColor} px-2 py-0.5 rounded-full text-[10px] font-bold uppercase`}>
+                          {stato}
+                        </span>
+                      </div>
+                      <div className="text-sm text-gray-500 flex items-center gap-1">
+                        <span>📍</span> {corsa.partenza_citta} <span className="mx-1">➡️</span> {corsa.arrivo_citta}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* BOTTONE DETTAGLI */}
+                  <Link 
+                    href={`/prenotazioni/${corsa.id}`} 
+                    className="bg-gray-100 text-gray-600 px-5 py-2 rounded-xl text-sm font-bold hover:bg-blue-600 hover:text-white transition-colors"
+                  >
+                    Dettagli
+                  </Link>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
