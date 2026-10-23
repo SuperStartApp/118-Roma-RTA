@@ -58,7 +58,6 @@ export default function PazientiPage() {
 
       if (cErr) throw cErr;
 
-      // Mappa delle corse per paziente
       const corseMap: Record<string, { count: number; lastDate: string | null }> = {};
       (corseList || []).forEach((c) => {
         if (!c.paziente_id) return;
@@ -83,13 +82,35 @@ export default function PazientiPage() {
     }
   }
 
-  const apriWhatsApp = (nome: string, telefono: string) => {
-    let num = telefono.replace(/\D/g, "");
+  // MESSAGGIO WHATSAPP COMPLETO E PROFESSIONALE
+  const apriWhatsApp = (p: PazienteConStorico) => {
+    if (!p.telefono) return;
+
+    let num = p.telefono.replace(/\D/g, "");
     if (num.length === 10 && !num.startsWith("39")) {
       num = "39" + num;
     }
-    const msg = encodeURIComponent(`Gentile ${nome}, la contattiamo dalla centrale operativa AmbulancePro.`);
-    window.open(`https://wa.me/${num}?text=${msg}`, "_blank");
+
+    const ultimaDataFormatted = p.ultimaCorsa
+      ? new Date(p.ultimaCorsa).toLocaleDateString("it-IT")
+      : null;
+
+    const messaggio = 
+`🚑 *CENTRALE OPERATIVA AMBULANCEPRO*
+
+Gentile *${p.nome} ${p.cognome}*${p.codice_fiscale ? ` (C.F.: ${p.codice_fiscale})` : ""},
+La contattiamo dalla nostra Centrale Operativa per i servizi di trasporto sanitario.
+${ultimaDataFormatted ? `\n📌 _Riferimento ultimo servizio registrato: ${ultimaDataFormatted}_` : ""}
+
+Rimaniamo a Sua completa disposizione per:
+• Conferma orari e itinerari
+• Prenotazione nuovi trasporti sanitari / visite / dialisi
+• Variazioni e comunicazioni all'equipaggio
+
+Può rispondere direttamente a questo messaggio per qualsiasi necessità.
+_AmbulancePro - Assistenza Trasporti Sanitari_`;
+
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`, "_blank");
   };
 
   const filteredPazienti = pazienti.filter((p) => {
@@ -114,7 +135,7 @@ export default function PazientiPage() {
               Rubrica Pazienti & Storico
             </h1>
             <p className="text-sm text-slate-500">
-              Gestione degli assistiti con indicazione delle corse effettuate e contatto rapido.
+              Gestione assistiti censiti: puoi contattarli su WhatsApp o aprire una nuova prenotazione con dati già compilati.
             </p>
           </div>
 
@@ -208,7 +229,7 @@ export default function PazientiPage() {
                       {p.ultimaCorsa && (
                         <div className="flex items-center gap-1.5 text-slate-500">
                           <Clock size={13} className="text-slate-400 shrink-0" />
-                          <span>Ultimo servizio effettuato: <strong className="text-slate-700">{new Date(p.ultimaCorsa).toLocaleDateString("it-IT")}</strong></span>
+                          <span>Ultimo trasporto: <strong className="text-slate-700">{new Date(p.ultimaCorsa).toLocaleDateString("it-IT")}</strong></span>
                         </div>
                       )}
 
@@ -228,12 +249,12 @@ export default function PazientiPage() {
                     </div>
                   </div>
 
-                  {/* Pulsanti Rapidi WhatsApp e Chiamata */}
+                  {/* Pulsanti Rapidi WhatsApp e Nuova Corsa Precompilata */}
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                     {p.telefono ? (
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => apriWhatsApp(p.nome, p.telefono!)}
+                          onClick={() => apriWhatsApp(p)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm"
                           title="Invia messaggio WhatsApp"
                         >
@@ -251,12 +272,14 @@ export default function PazientiPage() {
                         </a>
                       </div>
                     ) : (
-                      <span className="text-[11px] text-slate-400 italic">Nessun recapito telefonico</span>
+                      <span className="text-[11px] text-slate-400 italic">Nessun recapito</span>
                     )}
 
+                    {/* LINK DI PRENOTAZIONE CON ID PAZIENTE AGGANCIATO */}
                     <Link
-                      href="/prenotazione"
-                      className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 transition ml-auto"
+                      href={`/prenotazione?paziente_id=${p.id}`}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition ml-auto"
+                      title="Apri form con dati già compilati"
                     >
                       <span>Nuova Corsa</span>
                       <ArrowRight size={13} />

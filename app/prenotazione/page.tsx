@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, Suspense } from "react";
 import { supabase } from "@/app/lib/supabase";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { 
   User, 
   CalendarDays, 
@@ -17,15 +17,21 @@ import {
   Wind, 
   ArrowRight,
   Phone,
-  MessageSquare
+  MessageSquare,
+  Sparkles
 } from "lucide-react";
 
-export default function PrenotazionePage() {
+function PrenotazioneFormContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pazienteIdFromUrl = searchParams.get("paziente_id");
+
   const [loading, setLoading] = useState(false);
+  const [loadingPaziente, setLoadingPaziente] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [autisti, setAutisti] = useState<any[]>([]);
   const [whatsAppUrl, setWhatsAppUrl] = useState<string | null>(null);
+  const [existingPazienteId, setExistingPazienteId] = useState<string | null>(null);
 
   const initialFormState = {
     // Paziente
@@ -71,6 +77,7 @@ export default function PrenotazionePage() {
 
   const [formData, setFormData] = useState(initialFormState);
 
+  // 1. CARICAMENTO AUTISTI
   useEffect(() => {
     async function loadAutisti() {
       const { data } = await supabase
@@ -82,6 +89,45 @@ export default function PrenotazionePage() {
     }
     loadAutisti();
   }, []);
+
+  // 2. RECUPERO DATI SE IL PAZIENTE ARRIVA DALLA RUBRICA
+  useEffect(() => {
+    if (!pazienteIdFromUrl) return;
+
+    async function loadPazienteData() {
+      setLoadingPaziente(true);
+      try {
+        const { data, error } = await supabase
+          .from("pazienti")
+          .select("*")
+          .eq("id", pazienteIdFromUrl)
+          .single();
+
+        if (error) throw error;
+        if (data) {
+          setExistingPazienteId(data.id);
+          setFormData((prev) => ({
+            ...prev,
+            nome: data.nome || "",
+            cognome: data.cognome || "",
+            telefono: data.telefono || "",
+            data_nascita: data.data_nascita || "",
+            luogo_nascita: data.luogo_nascita || "",
+            codice_fiscale: data.codice_fiscale || "",
+            residenza: data.residenza || "",
+            peso_approssimativo: data.peso_approssimativo || "",
+            patologia: data.patologia || "",
+          }));
+        }
+      } catch (err) {
+        console.error("Errore recupero paziente da URL:", err);
+      } finally {
+        setLoadingPaziente(false);
+      }
+    }
+
+    loadPazienteData();
+  }, [pazienteIdFromUrl]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const target = e.target as HTMLInputElement;
@@ -101,18 +147,17 @@ export default function PrenotazionePage() {
 `🚑 *CONFERMA PRENOTAZIONE TRASPORTO SANITARIO*
 
 Gentile *${formData.nome.trim()} ${formData.cognome.trim()}*,
-le confermiamo la prenotazione del servizio:
+Le confermiamo la registrazione del trasporto sanitario:
 
-📅 *Data:* ${dataFormatted}
+📅 *Data servizio:* ${dataFormatted}
 ⏰ *Orario convocazione:* ore ${formData.ora_appuntamento}
 
 📍 *Ritiro:* ${formData.partenza_via} ${formData.partenza_civico || ""}, ${formData.partenza_citta}
 🏥 *Destinazione:* ${formData.arrivo_via} ${formData.arrivo_civico || ""}, ${formData.arrivo_citta}
-${formData.costo ? `💶 *Importo convenuto:* ${formData.costo} €` : ""}
+${formData.costo ? `💶 *Importo concordato:* ${formData.costo} €` : ""}
 
-_Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete contattare direttamente questo recapito._`;
+_Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni può rispondere a questo messaggio._`;
 
-    // Pulizia del numero telefonico (rimuove spazi, trattini e aggiunge il 39 se assente)
     let num = formData.telefono.replace(/\D/g, "");
     if (num.length === 10 && !num.startsWith("39")) {
       num = "39" + num;
@@ -128,31 +173,36 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
     setWhatsAppUrl(null);
 
     try {
-      // 1. Inserimento Paziente
-      const { data: paziente, error: pError } = await supabase
-        .from("pazienti")
-        .insert([
-          {
-            nome: formData.nome.trim(),
-            cognome: formData.cognome.trim(),
-            telefono: formData.telefono.trim() || null,
-            data_nascita: formData.data_nascita || null,
-            luogo_nascita: formData.luogo_nascita.trim() || null,
-            codice_fiscale: formData.codice_fiscale.trim().toUpperCase() || null,
-            residenza: formData.residenza.trim() || null,
-            peso_approssimativo: formData.peso_approssimativo.trim() || null,
-            patologia: formData.patologia.trim() || null,
-          },
-        ])
-        .select()
-        .single();
+      let finalPazienteId = existingPazienteId;
 
-      if (pError) throw pError;
+      // Se il paziente NON esiste già, creiamo il nuovo record
+      if (!finalPazienteId) {
+        const { data: paziente, error: pError } = await supabase
+          .from("pazienti")
+          .insert([
+            {
+              nome: formData.nome.trim(),
+              cognome: formData.cognome.trim(),
+              telefono: formData.telefono.trim() || null,
+              data_nascita: formData.data_nascita || null,
+              luogo_nascita: formData.luogo_nascita.trim() || null,
+              codice_fiscale: formData.codice_fiscale.trim().toUpperCase() || null,
+              residenza: formData.residenza.trim() || null,
+              peso_approssimativo: formData.peso_approssimativo.trim() || null,
+              patologia: formData.patologia.trim() || null,
+            },
+          ])
+          .select()
+          .single();
+
+        if (pError) throw pError;
+        finalPazienteId = paziente.id;
+      }
 
       // 2. Inserimento Corsa
       const { error: rError } = await supabase.from("prenotazioni").insert([
         {
-          paziente_id: paziente.id,
+          paziente_id: finalPazienteId,
           autista_id: formData.autista_id || null,
           data_appuntamento: formData.data_appuntamento,
           ora_appuntamento: formData.ora_appuntamento,
@@ -197,6 +247,7 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
 
       // Reset modulo
       setFormData(initialFormState);
+      setExistingPazienteId(null);
       window.scrollTo({ top: 0, behavior: "smooth" });
 
     } catch (error: any) {
@@ -211,61 +262,80 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
-      <div className="max-w-4xl mx-auto space-y-6">
-        
-        {/* INTESTAZIONE */}
-        <div className="pb-3 border-b border-slate-200">
-          <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-600 mb-1">
-            <PlusCircle size={14} /> Accettazione & Dispacciamento
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            Nuovo Servizio di Trasporto Sanitario
-          </h1>
-          <p className="text-sm text-slate-500 mt-0.5">
-            Inserisci i dati del paziente: al salvataggio partirà automaticamente la notifica WhatsApp di conferma.
-          </p>
+    <div className="max-w-4xl mx-auto space-y-6">
+      
+      {/* INTESTAZIONE */}
+      <div className="pb-3 border-b border-slate-200">
+        <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-600 mb-1">
+          <PlusCircle size={14} /> Accettazione & Dispacciamento
         </div>
+        <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+          Nuovo Servizio di Trasporto Sanitario
+        </h1>
+        <p className="text-sm text-slate-500 mt-0.5">
+          {existingPazienteId
+            ? "I dati anagrafici del paziente sono stati caricati automaticamente dalla rubrica."
+            : "Inserisci i dati del paziente: al salvataggio partirà automaticamente la notifica WhatsApp di conferma."}
+        </p>
 
-        {/* FEEDBACK STATUS BANNER */}
-        {statusMessage && (
-          <div
-            className={`p-4 rounded-xl text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 border ${
-              statusMessage.type === "success"
-                ? "bg-emerald-50 text-emerald-800 border-emerald-200"
-                : "bg-rose-50 text-rose-800 border-rose-200"
-            }`}
-          >
-            <div className="flex items-center gap-3">
-              {statusMessage.type === "success" ? (
-                <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-              ) : (
-                <AlertCircle size={20} className="text-rose-600 shrink-0" />
-              )}
-              <span>{statusMessage.text}</span>
-            </div>
-
-            {whatsAppUrl && (
-              <a
-                href={whatsAppUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm shrink-0"
-              >
-                <MessageSquare size={14} />
-                <span>Riapri Notifica WhatsApp</span>
-              </a>
-            )}
+        {existingPazienteId && (
+          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+            <Sparkles size={14} className="text-emerald-600" />
+            <span>Paziente già censito: dati anagrafici collegati senza duplicati</span>
           </div>
         )}
+      </div>
 
+      {/* FEEDBACK STATUS BANNER */}
+      {statusMessage && (
+        <div
+          className={`p-4 rounded-xl text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 border ${
+            statusMessage.type === "success"
+              ? "bg-emerald-50 text-emerald-800 border-emerald-200"
+              : "bg-rose-50 text-rose-800 border-rose-200"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {statusMessage.type === "success" ? (
+              <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+            ) : (
+              <AlertCircle size={20} className="text-rose-600 shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+
+          {whatsAppUrl && (
+            <a
+              href={whatsAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm shrink-0"
+            >
+              <MessageSquare size={14} />
+              <span>Riapri Notifica WhatsApp</span>
+            </a>
+          )}
+        </div>
+      )}
+
+      {loadingPaziente ? (
+        <div className="flex justify-center items-center py-20 text-slate-500 space-y-2">
+          <Loader2 className="animate-spin text-blue-600" size={32} />
+          <span className="text-sm font-medium ml-2">Recupero scheda anagrafica...</span>
+        </div>
+      ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
           
           {/* SEZIONE 1: ANAGRAFICA PAZIENTE */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
-            <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
-              <User size={18} className="text-blue-600" />
-              <span>Anagrafica Paziente</span>
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900 font-bold text-base">
+                <User size={18} className="text-blue-600" />
+                <span>Anagrafica Paziente</span>
+              </div>
+              {existingPazienteId && (
+                <span className="text-[11px] font-semibold text-slate-400">ID: {existingPazienteId.slice(0, 8)}</span>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
@@ -319,7 +389,7 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
                   name="codice_fiscale"
                   value={formData.codice_fiscale}
                   onChange={handleChange}
-                  placeholder="16 caratteri alfanumerici"
+                  placeholder="16 caratteri"
                   className="w-full text-sm uppercase font-mono bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   maxLength={16}
                 />
@@ -367,14 +437,14 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
                   rows={2}
                   value={formData.patologia}
                   onChange={handleChange}
-                  placeholder="Es. Deambulante, sedia a rotelle, barellato, ossigenoterapia..."
+                  placeholder="Deambulante, sedia a rotelle, allettato, dialisi..."
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition resize-none"
                 />
               </div>
             </div>
           </div>
 
-          {/* SEZIONE 2: PIANIFICAZIONE & ASSEGNAZIONE EQUIPAGGIO */}
+          {/* SEZIONE 2: PIANIFICAZIONE & EQUIPAGGIO */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
               <CalendarDays size={18} className="text-blue-600" />
@@ -559,13 +629,13 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
               </div>
 
               <div className="sm:col-span-2 md:col-span-4">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Se Struttura Sanitaria / Ospedale</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Se Ospedale / Struttura</label>
                 <input
                   type="text"
                   name="partenza_dettagli_ospedale"
                   value={formData.partenza_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Reparto Dialisi, Piano 1, Stanza 4"
+                  placeholder="Es. Padiglione 4, Reparto Dialisi, Piano 1"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -619,13 +689,13 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
               </div>
 
               <div className="sm:col-span-2 md:col-span-4">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Se Struttura Sanitaria / Ospedale</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Se Ospedale / Struttura</label>
                 <input
                   type="text"
                   name="arrivo_dettagli_ospedale"
                   value={formData.arrivo_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Policlinico San Matteo, Ingresso Day Hospital"
+                  placeholder="Es. Policlinico San Matteo, Ambulatorio 3"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -702,7 +772,7 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
               ) : (
                 <>
                   <MessageSquare size={18} />
-                  <span>Conferma, Assegna e Invia WhatsApp al Cliente</span>
+                  <span>Conferma e Invia WhatsApp al Cliente</span>
                   <ArrowRight size={18} />
                 </>
               )}
@@ -710,8 +780,22 @@ _Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete
           </div>
 
         </form>
+      )}
 
-      </div>
+    </div>
+  );
+}
+
+export default function PrenotazionePage() {
+  return (
+    <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
+      <Suspense fallback={
+        <div className="flex justify-center items-center py-24 text-slate-400">
+          <Loader2 className="animate-spin text-blue-600" size={36} />
+        </div>
+      }>
+        <PrenotazioneFormContent />
+      </Suspense>
     </div>
   );
 }
