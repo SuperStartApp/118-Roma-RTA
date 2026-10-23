@@ -11,7 +11,7 @@ import {
   ClipboardList, 
   CalendarDays, 
   Ambulance, 
-  ShieldAlert 
+  Users // <--- Aggiunto qui!
 } from "lucide-react";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -27,13 +27,14 @@ function Navbar() {
   const navItems = [
     { href: "/", label: "Home", icon: Home },
     { href: "/agenda", label: "Agenda", icon: CalendarDays },
+    { href: "/pazienti", label: "Pazienti", icon: Users },
     { href: "/prenotazioni", label: "Corse", icon: ClipboardList },
     { href: "/prenotazione", label: "Nuova", icon: PlusCircle, highlight: true },
   ];
 
   return (
     <>
-      {/* HEADER SUPERIORE: Pulito, professionale, compatto */}
+      {/* HEADER SUPERIORE */}
       <header className="sticky top-0 z-40 w-full bg-slate-900 text-slate-100 border-b border-slate-800 shadow-sm">
         <div className="max-w-6xl mx-auto px-4 h-14 md:h-16 flex items-center justify-between">
           
@@ -52,7 +53,7 @@ function Navbar() {
             </div>
           </Link>
 
-          {/* MENU DESKTOP (nascosto su smartphone) */}
+          {/* MENU DESKTOP */}
           <nav className="hidden md:flex items-center space-x-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -82,7 +83,7 @@ function Navbar() {
                   }`}
                 >
                   <Icon size={16} />
-                  <span>{item.label === "Nuova" ? "Nuova Corsa" : item.label === "Corse" ? "Lista Corse" : item.label}</span>
+                  <span>{item.label}</span>
                 </Link>
               );
             })}
@@ -96,7 +97,7 @@ function Navbar() {
         </div>
       </header>
 
-      {/* BOTTOM NAVIGATION BAR PER CELLULARI (fissa in basso stile vera app) */}
+      {/* BOTTOM BAR MOBILE */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-800 py-1.5 px-2 flex justify-around items-center backdrop-blur-md bg-opacity-95 shadow-lg">
         {navItems.map((item) => {
           const Icon = item.icon;
@@ -149,7 +150,6 @@ export default function RootLayout({
           <Navbar />
         </Suspense>
         
-        {/* pb-24 serve per evitare che la barra inferiore copra i contenuti da smartphone */}
         <main className="flex-1 w-full pb-24 md:pb-8">
           {children}
         </main>

@@ -15,7 +15,9 @@ import {
   PlusCircle, 
   Stethoscope, 
   Wind, 
-  ArrowRight
+  ArrowRight,
+  Phone,
+  MessageSquare
 } from "lucide-react";
 
 export default function PrenotazionePage() {
@@ -23,11 +25,13 @@ export default function PrenotazionePage() {
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [autisti, setAutisti] = useState<any[]>([]);
+  const [whatsAppUrl, setWhatsAppUrl] = useState<string | null>(null);
 
   const initialFormState = {
     // Paziente
     nome: "",
     cognome: "",
+    telefono: "",
     data_nascita: "",
     luogo_nascita: "",
     codice_fiscale: "",
@@ -88,19 +92,50 @@ export default function PrenotazionePage() {
     }));
   };
 
+  const generaMessaggioWhatsApp = () => {
+    const dataFormatted = formData.data_appuntamento
+      ? new Date(formData.data_appuntamento).toLocaleDateString("it-IT")
+      : "";
+
+    const testo = 
+`🚑 *CONFERMA PRENOTAZIONE TRASPORTO SANITARIO*
+
+Gentile *${formData.nome.trim()} ${formData.cognome.trim()}*,
+le confermiamo la prenotazione del servizio:
+
+📅 *Data:* ${dataFormatted}
+⏰ *Orario convocazione:* ore ${formData.ora_appuntamento}
+
+📍 *Ritiro:* ${formData.partenza_via} ${formData.partenza_civico || ""}, ${formData.partenza_citta}
+🏥 *Destinazione:* ${formData.arrivo_via} ${formData.arrivo_civico || ""}, ${formData.arrivo_citta}
+${formData.costo ? `💶 *Importo convenuto:* ${formData.costo} €` : ""}
+
+_Il nostro equipaggio sarà a vostra disposizione. Per variazioni urgenti potete contattare direttamente questo recapito._`;
+
+    // Pulizia del numero telefonico (rimuove spazi, trattini e aggiunge il 39 se assente)
+    let num = formData.telefono.replace(/\D/g, "");
+    if (num.length === 10 && !num.startsWith("39")) {
+      num = "39" + num;
+    }
+
+    return `https://wa.me/${num}?text=${encodeURIComponent(testo)}`;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setStatusMessage(null);
+    setWhatsAppUrl(null);
 
     try {
-      // 1. Inserimento Paziente (gestione sicura dei campi opzionali)
+      // 1. Inserimento Paziente
       const { data: paziente, error: pError } = await supabase
         .from("pazienti")
         .insert([
           {
             nome: formData.nome.trim(),
             cognome: formData.cognome.trim(),
+            telefono: formData.telefono.trim() || null,
             data_nascita: formData.data_nascita || null,
             luogo_nascita: formData.luogo_nascita.trim() || null,
             codice_fiscale: formData.codice_fiscale.trim().toUpperCase() || null,
@@ -114,7 +149,7 @@ export default function PrenotazionePage() {
 
       if (pError) throw pError;
 
-      // 2. Inserimento Prenotazione
+      // 2. Inserimento Corsa
       const { error: rError } = await supabase.from("prenotazioni").insert([
         {
           paziente_id: paziente.id,
@@ -148,19 +183,21 @@ export default function PrenotazionePage() {
 
       if (rError) throw rError;
 
+      // 3. Apertura immediata di WhatsApp se c'è un recapito telefonico
+      if (formData.telefono.trim()) {
+        const waLink = generaMessaggioWhatsApp();
+        setWhatsAppUrl(waLink);
+        window.open(waLink, "_blank");
+      }
+
       setStatusMessage({
         type: "success",
-        text: "Missione di trasporto registrata con successo!",
+        text: "Servizio registrato con successo nel sistema!",
       });
 
-      // Reset modulo e scroll in alto
+      // Reset modulo
       setFormData(initialFormState);
       window.scrollTo({ top: 0, behavior: "smooth" });
-
-      // Opzionale: dopo 1.5 secondi torna alla lista corse
-      setTimeout(() => {
-        router.push("/prenotazioni");
-      }, 1500);
 
     } catch (error: any) {
       console.error(error);
@@ -186,25 +223,39 @@ export default function PrenotazionePage() {
             Nuovo Servizio di Trasporto Sanitario
           </h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Compila la scheda anagrafica del paziente, i punti di prelievo e assegna l'equipaggio.
+            Inserisci i dati del paziente: al salvataggio partirà automaticamente la notifica WhatsApp di conferma.
           </p>
         </div>
 
         {/* FEEDBACK STATUS BANNER */}
         {statusMessage && (
           <div
-            className={`p-4 rounded-xl text-sm font-medium flex items-center gap-3 border ${
+            className={`p-4 rounded-xl text-sm font-medium flex flex-col sm:flex-row sm:items-center justify-between gap-3 border ${
               statusMessage.type === "success"
                 ? "bg-emerald-50 text-emerald-800 border-emerald-200"
                 : "bg-rose-50 text-rose-800 border-rose-200"
             }`}
           >
-            {statusMessage.type === "success" ? (
-              <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle size={20} className="text-rose-600 shrink-0" />
+            <div className="flex items-center gap-3">
+              {statusMessage.type === "success" ? (
+                <CheckCircle2 size={20} className="text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle size={20} className="text-rose-600 shrink-0" />
+              )}
+              <span>{statusMessage.text}</span>
+            </div>
+
+            {whatsAppUrl && (
+              <a
+                href={whatsAppUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm shrink-0"
+              >
+                <MessageSquare size={14} />
+                <span>Riapri Notifica WhatsApp</span>
+              </a>
             )}
-            <span>{statusMessage.text}</span>
           </div>
         )}
 
@@ -225,7 +276,7 @@ export default function PrenotazionePage() {
                   name="nome"
                   value={formData.nome}
                   onChange={handleChange}
-                  placeholder="Es. Marco"
+                  placeholder="Es. Mario"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   required
                 />
@@ -238,8 +289,25 @@ export default function PrenotazionePage() {
                   name="cognome"
                   value={formData.cognome}
                   onChange={handleChange}
-                  placeholder="Es. Bianchi"
+                  placeholder="Es. Rossi"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
+                  required
+                />
+              </div>
+
+              {/* RECAPITO WHATSAPP */}
+              <div>
+                <label className="block text-xs font-semibold text-emerald-700 mb-1 flex items-center gap-1">
+                  <Phone size={13} className="text-emerald-600" />
+                  <span>Cellulare / WhatsApp <span className="text-rose-500">*</span></span>
+                </label>
+                <input
+                  type="tel"
+                  name="telefono"
+                  value={formData.telefono}
+                  onChange={handleChange}
+                  placeholder="Es. 340 1234567"
+                  className="w-full text-sm bg-emerald-50/40 border border-emerald-300 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-emerald-600 outline-none transition font-medium"
                   required
                 />
               </div>
@@ -275,25 +343,13 @@ export default function PrenotazionePage() {
                   name="luogo_nascita"
                   value={formData.luogo_nascita}
                   onChange={handleChange}
-                  placeholder="Comune o Stato estero"
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Peso Indicativo (kg)</label>
-                <input
-                  type="text"
-                  name="peso_approssimativo"
-                  value={formData.peso_approssimativo}
-                  onChange={handleChange}
-                  placeholder="Es. 75 kg (per telo/barella)"
+                  placeholder="Comune o Stato"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
 
               <div className="sm:col-span-2 md:col-span-3">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Indirizzo di Residenza (per fatturazione/ricevuta)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Indirizzo di Residenza</label>
                 <input
                   type="text"
                   name="residenza"
@@ -305,13 +361,13 @@ export default function PrenotazionePage() {
               </div>
 
               <div className="sm:col-span-2 md:col-span-3">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Condizioni Cliniche / Patologia / Limitazioni Motorie</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Condizioni Cliniche / Note Sanitarie</label>
                 <textarea
                   name="patologia"
                   rows={2}
                   value={formData.patologia}
                   onChange={handleChange}
-                  placeholder="Es. Paziente non deambulante in carrozzina, ossigenoterapia attiva, allettato..."
+                  placeholder="Es. Deambulante, sedia a rotelle, barellato, ossigenoterapia..."
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition resize-none"
                 />
               </div>
@@ -368,7 +424,7 @@ export default function PrenotazionePage() {
               </div>
             </div>
 
-            {/* Presidi Medici Richiesti */}
+            {/* Presidi Sanitari */}
             <div className="pt-2">
               <label className="block text-xs font-semibold text-slate-600 mb-2">Presidi Sanitari Richiesti</label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -419,7 +475,7 @@ export default function PrenotazionePage() {
             </div>
           </div>
 
-          {/* SEZIONE 3: PUNTO DI PARTENZA (RITIRO) */}
+          {/* SEZIONE 3: PARTENZA */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
               <MapPin size={18} className="text-blue-600" />
@@ -460,7 +516,7 @@ export default function PrenotazionePage() {
                   name="partenza_civico"
                   value={formData.partenza_civico}
                   onChange={handleChange}
-                  placeholder="Es. 12/A"
+                  placeholder="Es. 12"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -472,7 +528,7 @@ export default function PrenotazionePage() {
                   name="partenza_piano"
                   value={formData.partenza_piano}
                   onChange={handleChange}
-                  placeholder="Es. 3°"
+                  placeholder="Es. 2°"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -484,7 +540,7 @@ export default function PrenotazionePage() {
                   name="partenza_interno"
                   value={formData.partenza_interno}
                   onChange={handleChange}
-                  placeholder="Es. Scala B int. 8"
+                  placeholder="Es. Scala A"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -498,7 +554,7 @@ export default function PrenotazionePage() {
                     onChange={handleChange}
                     className="w-4 h-4 text-blue-600 rounded"
                   />
-                  <span>Ascensore Presente / Utilizzabile</span>
+                  <span>Ascensore Presente</span>
                 </label>
               </div>
 
@@ -509,14 +565,14 @@ export default function PrenotazionePage() {
                   name="partenza_dettagli_ospedale"
                   value={formData.partenza_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Padiglione 4, Reparto Ortopedia, Letto 12"
+                  placeholder="Es. Reparto Dialisi, Piano 1, Stanza 4"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
             </div>
           </div>
 
-          {/* SEZIONE 4: DESTINAZIONE (ARRIVO) */}
+          {/* SEZIONE 4: ARRIVO */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
               <Building size={18} className="text-emerald-600" />
@@ -562,43 +618,6 @@ export default function PrenotazionePage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Piano</label>
-                <input
-                  type="text"
-                  name="arrivo_piano"
-                  value={formData.arrivo_piano}
-                  onChange={handleChange}
-                  placeholder="Es. Piano Terra"
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Interno / Scala</label>
-                <input
-                  type="text"
-                  name="arrivo_interno"
-                  value={formData.arrivo_interno}
-                  onChange={handleChange}
-                  placeholder="Es. Ingresso Day Hospital"
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
-                />
-              </div>
-
-              <div className="flex items-center pt-5">
-                <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-slate-700">
-                  <input
-                    type="checkbox"
-                    name="arrivo_ascensore"
-                    checked={formData.arrivo_ascensore}
-                    onChange={handleChange}
-                    className="w-4 h-4 text-blue-600 rounded"
-                  />
-                  <span>Ascensore Presente / Montacarichi</span>
-                </label>
-              </div>
-
               <div className="sm:col-span-2 md:col-span-4">
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Se Struttura Sanitaria / Ospedale</label>
                 <input
@@ -606,14 +625,14 @@ export default function PrenotazionePage() {
                   name="arrivo_dettagli_ospedale"
                   value={formData.arrivo_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Policlinico San Matteo, Clinica Medica, Ambulatorio 3"
+                  placeholder="Es. Policlinico San Matteo, Ingresso Day Hospital"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
             </div>
           </div>
 
-          {/* SEZIONE 5: CONDIZIONI ECONOMICHE & PAGAMENTO */}
+          {/* SEZIONE 5: CONDIZIONI ECONOMICHE */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
               <CreditCard size={18} className="text-blue-600" />
@@ -622,40 +641,14 @@ export default function PrenotazionePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Costo Base Convenuto (€)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Costo Base (€)</label>
                 <input
                   type="number"
                   step="0.01"
                   name="costo"
                   value={formData.costo}
                   onChange={handleChange}
-                  placeholder="Es. 120"
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Ore Incluse nel Servizio</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  name="ore_incluse"
-                  value={formData.ore_incluse}
-                  onChange={handleChange}
-                  placeholder="Es. 2"
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Tariffa Ora Extra (€/h)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  name="costo_ora_supplementare"
-                  value={formData.costo_ora_supplementare}
-                  onChange={handleChange}
-                  placeholder="Es. 35"
+                  placeholder="Es. 100"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -671,11 +664,11 @@ export default function PrenotazionePage() {
                   <option value="Contanti">Contanti</option>
                   <option value="Bancomat / POS">Bancomat / POS</option>
                   <option value="Bonifico Istantaneo">Bonifico Istantaneo</option>
-                  <option value="Fattura Differita (Convenzione)">Fattura Differita (Convenzione)</option>
+                  <option value="Fattura Differita">Fattura Differita</option>
                 </select>
               </div>
 
-              <div className="sm:col-span-2 md:col-span-4 pt-1">
+              <div className="sm:col-span-2 md:col-span-2 pt-5">
                 <label className={`inline-flex items-center gap-2.5 px-4 py-2.5 rounded-xl border cursor-pointer transition ${
                   formData.pagato ? "bg-emerald-50 border-emerald-300 text-emerald-800" : "bg-slate-50 border-slate-200 text-slate-700"
                 }`}>
@@ -687,7 +680,7 @@ export default function PrenotazionePage() {
                     className="w-4 h-4 text-emerald-600 rounded"
                   />
                   <span className="text-xs font-bold uppercase tracking-wide">
-                    {formData.pagato ? "Servizio Già Saldato / Pagato" : "Importo Da Saldare al Termine della Corsa"}
+                    {formData.pagato ? "Servizio Saldato" : "Da Saldare al Ritiro"}
                   </span>
                 </label>
               </div>
@@ -699,16 +692,17 @@ export default function PrenotazionePage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 px-6 rounded-xl font-bold text-sm tracking-wide transition shadow-sm active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-4 px-6 rounded-xl font-bold text-sm tracking-wide transition shadow-sm active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
                   <Loader2 size={18} className="animate-spin" />
-                  <span>Salvataggio e Assegnazione in corso...</span>
+                  <span>Salvataggio e Invio WhatsApp in corso...</span>
                 </>
               ) : (
                 <>
-                  <span>Conferma e Assegna Corsa</span>
+                  <MessageSquare size={18} />
+                  <span>Conferma, Assegna e Invia WhatsApp al Cliente</span>
                   <ArrowRight size={18} />
                 </>
               )}
