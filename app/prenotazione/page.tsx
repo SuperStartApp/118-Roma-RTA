@@ -18,7 +18,8 @@ import {
   ArrowRight,
   Phone,
   MessageSquare,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
 function PrenotazioneFormContent() {
@@ -90,10 +91,16 @@ function PrenotazioneFormContent() {
     loadAutisti();
   }, []);
 
-  // 2. RECUPERO DATI SE IL PAZIENTE ARRIVA DALLA RUBRICA
+  // 2. GESTIONE SELEZIONE / SVUOTAMENTO PAZIENTE
   useEffect(() => {
-    if (!pazienteIdFromUrl) return;
+    // Se non c'è l'ID nell'URL (es. clic da menu principale), svuota il form
+    if (!pazienteIdFromUrl) {
+      setExistingPazienteId(null);
+      setFormData(initialFormState);
+      return;
+    }
 
+    // Se c'è l'ID, carica i dati del paziente
     async function loadPazienteData() {
       setLoadingPaziente(true);
       try {
@@ -128,6 +135,13 @@ function PrenotazioneFormContent() {
 
     loadPazienteData();
   }, [pazienteIdFromUrl]);
+
+  // FUNZIONE PER SCOLLEGARE IL PAZIENTE E PULIRE IL FORM
+  const resetFormNuovoPaziente = () => {
+    setExistingPazienteId(null);
+    setFormData(initialFormState);
+    router.replace("/prenotazione"); // Rimuove ?paziente_id dall'URL
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const target = e.target as HTMLInputElement;
@@ -245,9 +259,10 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
         text: "Servizio registrato con successo nel sistema!",
       });
 
-      // Reset modulo
+      // Reset completo e pulizia URL
       setFormData(initialFormState);
       setExistingPazienteId(null);
+      router.replace("/prenotazione");
       window.scrollTo({ top: 0, behavior: "smooth" });
 
     } catch (error: any) {
@@ -274,14 +289,25 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
         </h1>
         <p className="text-sm text-slate-500 mt-0.5">
           {existingPazienteId
-            ? "I dati anagrafici del paziente sono stati caricati automaticamente dalla rubrica."
+            ? "I dati anagrafici sono stati caricati automaticamente dalla rubrica."
             : "Inserisci i dati del paziente: al salvataggio partirà automaticamente la notifica WhatsApp di conferma."}
         </p>
 
+        {/* BOX DI SEGNALAZIONE PAZIENTE COLLEGATO CON TASTO SCOLLEGA */}
         {existingPazienteId && (
-          <div className="mt-3 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
-            <Sparkles size={14} className="text-emerald-600" />
-            <span>Paziente già censito: dati anagrafici collegati senza duplicati</span>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
+            <div className="flex items-center gap-2 font-bold">
+              <Sparkles size={15} className="text-emerald-600 shrink-0" />
+              <span>Paziente censito: {formData.nome} {formData.cognome} (nessun duplicato)</span>
+            </div>
+            <button
+              type="button"
+              onClick={resetFormNuovoPaziente}
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-semibold transition shadow-sm self-start sm:self-auto"
+            >
+              <X size={13} />
+              <span>Scollega / Nuovo Paziente</span>
+            </button>
           </div>
         )}
       </div>
@@ -635,7 +661,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="partenza_dettagli_ospedale"
                   value={formData.partenza_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Padiglione 4, Reparto Dialisi, Piano 1"
+                  placeholder="Es. Reparto Dialisi, Piano 1, Stanza 4"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
