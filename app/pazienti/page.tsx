@@ -96,10 +96,10 @@ export default function PazientiPage() {
       : null;
 
     const messaggio = 
-`🚑 *CENTRALE OPERATIVA AMBULANCEPRO*
+`🚑 *CENTRALE OPERATIVA Centrale Operativa Roma R.T.A.*
 
 Gentile *${p.nome} ${p.cognome}*${p.codice_fiscale ? ` (C.F.: ${p.codice_fiscale})` : ""},
-La contattiamo dalla nostra Centrale Operativa per i servizi di trasporto sanitario.
+La contattiamo dalla nostra Centrale Operativa Roma R.T.A. per i servizi di trasporto sanitario.
 ${ultimaDataFormatted ? `\n📌 _Riferimento ultimo servizio registrato: ${ultimaDataFormatted}_` : ""}
 
 Rimaniamo a Sua completa disposizione per:

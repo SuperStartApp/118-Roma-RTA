@@ -132,7 +132,7 @@ ${loginUrl}
 2. Inserisci il PIN a 6 cifre
 3. Visualizzerai gli orari, i pazienti e il pulsante con il navigatore per ogni missione.
 
-_Centrale Operativa AmbulancePro_`;
+_Centrale Operativa Roma R.T.A._`;
 
     window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`, "_blank");
   };
