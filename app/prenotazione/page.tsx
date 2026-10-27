@@ -15,11 +15,12 @@ import {
   PlusCircle, 
   Stethoscope, 
   Wind, 
-  ArrowRight,
-  Phone,
-  MessageSquare,
-  Sparkles,
-  X
+  ArrowRight, 
+  Phone, 
+  MessageSquare, 
+  Sparkles, 
+  X,
+  ShieldCheck
 } from "lucide-react";
 
 function PrenotazioneFormContent() {
@@ -33,6 +34,7 @@ function PrenotazioneFormContent() {
   const [autisti, setAutisti] = useState<any[]>([]);
   const [whatsAppUrl, setWhatsAppUrl] = useState<string | null>(null);
   const [existingPazienteId, setExistingPazienteId] = useState<string | null>(null);
+  const [tesseraSocioInfo, setTesseraSocioInfo] = useState<string | null>(null);
 
   const initialFormState = {
     // Paziente
@@ -93,14 +95,13 @@ function PrenotazioneFormContent() {
 
   // 2. GESTIONE SELEZIONE / SVUOTAMENTO PAZIENTE
   useEffect(() => {
-    // Se non c'è l'ID nell'URL (es. clic da menu principale), svuota il form
     if (!pazienteIdFromUrl) {
       setExistingPazienteId(null);
+      setTesseraSocioInfo(null);
       setFormData(initialFormState);
       return;
     }
 
-    // Se c'è l'ID, carica i dati del paziente
     async function loadPazienteData() {
       setLoadingPaziente(true);
       try {
@@ -113,6 +114,9 @@ function PrenotazioneFormContent() {
         if (error) throw error;
         if (data) {
           setExistingPazienteId(data.id);
+          if (data.numero_tessera) {
+            setTesseraSocioInfo(`Socio Sostenitore N° #${data.numero_tessera}/${data.anno_tessera || ""}`);
+          }
           setFormData((prev) => ({
             ...prev,
             nome: data.nome || "",
@@ -136,11 +140,11 @@ function PrenotazioneFormContent() {
     loadPazienteData();
   }, [pazienteIdFromUrl]);
 
-  // FUNZIONE PER SCOLLEGARE IL PAZIENTE E PULIRE IL FORM
   const resetFormNuovoPaziente = () => {
     setExistingPazienteId(null);
+    setTesseraSocioInfo(null);
     setFormData(initialFormState);
-    router.replace("/prenotazione"); // Rimuove ?paziente_id dall'URL
+    router.replace("/prenotazione");
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -158,10 +162,11 @@ function PrenotazioneFormContent() {
       : "";
 
     const testo = 
-`🚑 *CONFERMA PRENOTAZIONE TRASPORTO SANITARIO*
+`🚑 *ROMA R.T.A. - TRASPORTO SANITARIO*
+_Ente Accreditato Regione Lazio_
 
 Gentile *${formData.nome.trim()} ${formData.cognome.trim()}*,
-Le confermiamo la registrazione del trasporto sanitario:
+Le confermiamo la prenotazione del servizio:
 
 📅 *Data servizio:* ${dataFormatted}
 ⏰ *Orario convocazione:* ore ${formData.ora_appuntamento}
@@ -170,7 +175,7 @@ Le confermiamo la registrazione del trasporto sanitario:
 🏥 *Destinazione:* ${formData.arrivo_via} ${formData.arrivo_civico || ""}, ${formData.arrivo_citta}
 ${formData.costo ? `💶 *Importo concordato:* ${formData.costo} €` : ""}
 
-_Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni può rispondere a questo messaggio._`;
+_Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazioni può rispondere direttamente a questo messaggio._`;
 
     let num = formData.telefono.replace(/\D/g, "");
     if (num.length === 10 && !num.startsWith("39")) {
@@ -213,7 +218,10 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
         finalPazienteId = paziente.id;
       }
 
-      // 2. Inserimento Corsa
+      // Normalizziamo il metodo di pagamento per garantire compatibilità con Supabase
+      const metodoScelto = formData.metodo_pagamento || "Contanti";
+
+      // Inserimento Corsa
       const { error: rError } = await supabase.from("prenotazioni").insert([
         {
           paziente_id: finalPazienteId,
@@ -240,14 +248,14 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
           costo: formData.costo ? parseFloat(formData.costo) : 0,
           ore_incluse: formData.ore_incluse ? parseFloat(formData.ore_incluse) : 0,
           costo_ora_supplementare: formData.costo_ora_supplementare ? parseFloat(formData.costo_ora_supplementare) : 0,
-          metodo_pagamento: formData.metodo_pagamento,
+          metodo_pagamento: metodoScelto,
           pagato: formData.pagato,
         },
       ]);
 
       if (rError) throw rError;
 
-      // 3. Apertura immediata di WhatsApp se c'è un recapito telefonico
+      // Apertura immediata di WhatsApp se c'è un recapito telefonico
       if (formData.telefono.trim()) {
         const waLink = generaMessaggioWhatsApp();
         setWhatsAppUrl(waLink);
@@ -262,6 +270,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
       // Reset completo e pulizia URL
       setFormData(initialFormState);
       setExistingPazienteId(null);
+      setTesseraSocioInfo(null);
       router.replace("/prenotazione");
       window.scrollTo({ top: 0, behavior: "smooth" });
 
@@ -290,20 +299,28 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
         <p className="text-sm text-slate-500 mt-0.5">
           {existingPazienteId
             ? "I dati anagrafici sono stati caricati automaticamente dalla rubrica."
-            : "Inserisci i dati del paziente: al salvataggio partirà automaticamente la notifica WhatsApp di conferma."}
+            : "Inserisci i dati del trasporto: al salvataggio partirà automaticamente la notifica WhatsApp di conferma."}
         </p>
 
-        {/* BOX DI SEGNALAZIONE PAZIENTE COLLEGATO CON TASTO SCOLLEGA */}
+        {/* BOX DI SEGNALAZIONE PAZIENTE CENSITO / SOCIO SOSTENITORE */}
         {existingPazienteId && (
-          <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs">
-            <div className="flex items-center gap-2 font-bold">
-              <Sparkles size={15} className="text-emerald-600 shrink-0" />
-              <span>Paziente censito: {formData.nome} {formData.cognome} (nessun duplicato)</span>
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 text-xs shadow-sm">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 font-bold text-sm text-slate-900">
+                <Sparkles size={16} className="text-blue-600 shrink-0" />
+                <span>Paziente in archivio: {formData.nome} {formData.cognome}</span>
+              </div>
+              {tesseraSocioInfo && (
+                <div className="inline-flex items-center gap-1 font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded border border-amber-300 text-[11px] mt-1">
+                  <ShieldCheck size={13} className="text-amber-700" />
+                  <span>{tesseraSocioInfo}</span>
+                </div>
+              )}
             </div>
             <button
               type="button"
               onClick={resetFormNuovoPaziente}
-              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 font-semibold transition shadow-sm self-start sm:self-auto"
+              className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 font-semibold transition shadow-sm self-start sm:self-auto"
             >
               <X size={13} />
               <span>Scollega / Nuovo Paziente</span>
@@ -391,7 +408,6 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                 />
               </div>
 
-              {/* RECAPITO WHATSAPP */}
               <div>
                 <label className="block text-xs font-semibold text-emerald-700 mb-1 flex items-center gap-1">
                   <Phone size={13} className="text-emerald-600" />
@@ -586,7 +602,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="partenza_citta"
                   value={formData.partenza_citta}
                   onChange={handleChange}
-                  placeholder="Es. Milano"
+                  placeholder="Es. Roma"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   required
                 />
@@ -599,7 +615,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="partenza_via"
                   value={formData.partenza_via}
                   onChange={handleChange}
-                  placeholder="Es. Via Roma"
+                  placeholder="Es. Via Appia Nuova"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   required
                 />
@@ -661,7 +677,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="partenza_dettagli_ospedale"
                   value={formData.partenza_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Reparto Dialisi, Piano 1, Stanza 4"
+                  placeholder="Es. Reparto Dialisi, Padiglione A, Stanza 4"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -683,7 +699,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="arrivo_citta"
                   value={formData.arrivo_citta}
                   onChange={handleChange}
-                  placeholder="Es. Pavia"
+                  placeholder="Es. Roma"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   required
                 />
@@ -696,7 +712,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="arrivo_via"
                   value={formData.arrivo_via}
                   onChange={handleChange}
-                  placeholder="Es. Viale Golgi"
+                  placeholder="Es. Via Casilina"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   required
                 />
@@ -709,7 +725,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="arrivo_civico"
                   value={formData.arrivo_civico}
                   onChange={handleChange}
-                  placeholder="Es. 19"
+                  placeholder="Es. 1040"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
@@ -721,14 +737,14 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="arrivo_dettagli_ospedale"
                   value={formData.arrivo_dettagli_ospedale}
                   onChange={handleChange}
-                  placeholder="Es. Policlinico San Matteo, Ambulatorio 3"
+                  placeholder="Es. Policlinico Casilino, Ambulatorio 3"
                   className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                 />
               </div>
             </div>
           </div>
 
-          {/* SEZIONE 5: CONDIZIONI ECONOMICHE */}
+          {/* SEZIONE 5: CONDIZIONI ECONOMICHE (TUTTI I METODI COMPATIBILI) */}
           <div className="bg-white p-5 md:p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold text-base border-b border-slate-100 pb-3">
               <CreditCard size={18} className="text-blue-600" />
@@ -755,12 +771,15 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per informazioni o variazioni
                   name="metodo_pagamento"
                   value={formData.metodo_pagamento}
                   onChange={handleChange}
-                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
+                  className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition cursor-pointer font-medium"
                 >
                   <option value="Contanti">Contanti</option>
-                  <option value="Bancomat / POS">Bancomat / POS</option>
+                  <option value="Bancomat">Bancomat</option>
+                  <option value="POS">POS a Bordo</option>
+                  <option value="Carta di Credito">Carta di Credito</option>
                   <option value="Bonifico Istantaneo">Bonifico Istantaneo</option>
-                  <option value="Fattura Differita">Fattura Differita</option>
+                  <option value="Bonifico">Bonifico Bancario</option>
+                  <option value="Da Concordare">Da Concordare</option>
                 </select>
               </div>
 

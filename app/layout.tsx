@@ -45,7 +45,7 @@ function Navbar() {
             </div>
             <div>
               <span className="font-bold text-base md:text-lg tracking-tight text-white block leading-tight">
-                Ambulance<span className="text-blue-400">Pro</span>
+                ROMA<span className="text-blue-400">R.T.A.</span>
               </span>
               <span className="text-[10px] text-slate-400 uppercase tracking-widest hidden sm:block">
                 Gestione Servizi
