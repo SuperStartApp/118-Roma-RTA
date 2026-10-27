@@ -13,7 +13,8 @@ import {
   Lock,
   KeyRound,
   LogOut,
-  AlertCircle
+  AlertCircle,
+  Sparkles
 } from "lucide-react";
 
 const MASTER_PIN = "1972";
@@ -24,7 +25,6 @@ export default function HomePage() {
   const [errorePin, setErrorePin] = useState(false);
 
   useEffect(() => {
-    // Verifica se la centrale è già stata sbloccata in questa sessione
     const isAuth = sessionStorage.getItem("centrale_sbloccata") === "true";
     setAutenticato(isAuth);
   }, []);
@@ -47,12 +47,11 @@ export default function HomePage() {
     setAutenticato(false);
   };
 
-  // SCHERMATA DI CARICAMENTO INIZIALE RAPIDA
   if (autenticato === null) {
     return <div className="min-h-screen bg-slate-900" />;
   }
 
-  // 1. SCHERMATA DI BLOCCO PIN (Se non ancora sbloccato)
+  // SCHERMATA DI BLOCCO PIN (1972)
   if (!autenticato) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
@@ -72,7 +71,7 @@ export default function HomePage() {
           </div>
 
           {errorePin && (
-            <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 text-left animate-shake">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 text-left">
               <AlertCircle size={15} className="shrink-0 text-rose-600" />
               <span>PIN non valido. Riprova.</span>
             </div>
@@ -103,7 +102,7 @@ export default function HomePage() {
             </button>
           </form>
 
-          {/* Tastierino numerico rapido */}
+          {/* Tastierino touch rapido */}
           <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
             {["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "OK"].map((btn) => (
               <button
@@ -135,8 +134,16 @@ export default function HomePage() {
     );
   }
 
-  // 2. DASHBOARD OPERATIVA PRINCIPALE (Sbloccata)
+  // SCHEDE DASHBOARD
   const cards = [
+    {
+      href: "/prenotazioni",
+      title: "Quadro Operativo Corse",
+      description: "Turno odierno, chiamate da assegnare e archivio storico con riassegnazione rapida.",
+      icon: ClipboardList,
+      badge: "Centrale Servizi",
+      highlighted: true, // QUESTA CARD È IL CUORE PULSANTE
+    },
     {
       href: "/prenotazione",
       title: "Nuova Prenotazione",
@@ -144,14 +151,6 @@ export default function HomePage() {
       icon: PlusCircle,
       badge: "Accettazione",
       iconColor: "text-blue-600 bg-blue-50 border-blue-100",
-    },
-    {
-      href: "/prenotazioni",
-      title: "Quadro Operativo Corse",
-      description: "Turno odierno, chiamate da assegnare e archivio storico con riassegnazione rapida.",
-      icon: ClipboardList,
-      badge: "Centrale Servizi",
-      iconColor: "text-emerald-600 bg-emerald-50 border-emerald-100",
     },
     {
       href: "/pazienti",
@@ -215,7 +214,6 @@ export default function HomePage() {
               <span>Nuovo Servizio</span>
             </Link>
 
-            {/* Tasto Blocca Schermo */}
             <button
               onClick={handleBloccaSchermo}
               className="inline-flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
@@ -227,38 +225,70 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* GRIGLIA FUNZIONALITÀ OTTIMIZZATA (6 SCHEDE CHIARE) */}
+        {/* GRIGLIA FUNZIONALITÀ CON CARD IN EVIDENZA */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {cards.map((card) => {
             const Icon = card.icon;
+            const isHigh = card.highlighted;
+
             return (
               <Link
                 key={card.href}
                 href={card.href}
-                className="group bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md transition-all flex flex-col justify-between"
+                className={`group p-6 rounded-3xl transition-all duration-300 flex flex-col justify-between relative overflow-hidden ${
+                  isHigh
+                    ? "bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-700 text-white shadow-xl shadow-blue-500/25 ring-2 ring-blue-400/50 hover:shadow-2xl hover:scale-[1.02] border border-blue-400/40"
+                    : "bg-white border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md hover:scale-[1.01]"
+                }`}
               >
+                {/* Glow decorativo per la card in evidenza */}
+                {isHigh && (
+                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+                )}
+
                 <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <div className={`w-12 h-12 rounded-xl border flex items-center justify-center ${card.iconColor} transition group-hover:scale-105`}>
-                      <Icon size={22} strokeWidth={2.2} />
+                  <div className="flex items-center justify-between mb-4 relative z-10">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${
+                      isHigh
+                        ? "bg-white/20 text-white backdrop-blur-md border border-white/30 shadow-inner"
+                        : `${card.iconColor} border`
+                    }`}>
+                      <Icon size={24} strokeWidth={2.3} />
                     </div>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+
+                    <span className={`text-[10px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full flex items-center gap-1.5 ${
+                      isHigh
+                        ? "bg-white/25 text-white backdrop-blur-sm border border-white/30"
+                        : "bg-slate-100 text-slate-600 border border-slate-200"
+                    }`}>
+                      {isHigh && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
                       {card.badge}
                     </span>
                   </div>
 
-                  <h2 className="text-lg font-bold text-slate-900 group-hover:text-blue-600 transition flex items-center justify-between">
+                  <h2 className={`text-xl font-extrabold transition flex items-center justify-between relative z-10 ${
+                    isHigh ? "text-white" : "text-slate-900 group-hover:text-blue-600"
+                  }`}>
                     <span>{card.title}</span>
-                    <ArrowUpRight size={16} className="text-slate-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    <ArrowUpRight size={18} className={`transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 ${
+                      isHigh ? "text-white/80" : "text-slate-400 opacity-0 group-hover:opacity-100"
+                    }`} />
                   </h2>
 
-                  <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  <p className={`text-xs mt-2 leading-relaxed relative z-10 ${
+                    isHigh ? "text-blue-100" : "text-slate-500"
+                  }`}>
                     {card.description}
                   </p>
                 </div>
 
-                <div className="pt-5 mt-4 border-t border-slate-100 flex items-center text-xs font-semibold text-slate-700 group-hover:text-blue-600 transition">
-                  <span>Accedi alla sezione</span>
+                <div className={`pt-5 mt-4 border-t flex items-center justify-between text-xs font-bold transition relative z-10 ${
+                  isHigh 
+                    ? "border-white/20 text-white" 
+                    : "border-slate-100 text-slate-700 group-hover:text-blue-600"
+                }`}>
+                  <span>{isHigh ? "Entra nel Quadro Corse →" : "Accedi alla sezione"}</span>
+                  {isHigh && <Sparkles size={14} className="text-amber-300" />}
                 </div>
               </Link>
             );
