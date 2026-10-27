@@ -8,14 +8,17 @@ import {
   Search, 
   Phone, 
   MessageSquare, 
-  Calendar, 
   Clock, 
   PlusCircle, 
   ShieldCheck, 
   Activity, 
   Loader2,
   MapPin,
-  ArrowRight
+  ArrowRight,
+  Edit,
+  X,
+  Save,
+  UserPlus
 } from "lucide-react";
 
 interface PazienteConStorico {
@@ -25,7 +28,12 @@ interface PazienteConStorico {
   telefono: string | null;
   codice_fiscale: string | null;
   residenza: string | null;
+  data_nascita?: string | null;
+  luogo_nascita?: string | null;
+  peso_approssimativo?: string | null;
   patologia: string | null;
+  numero_tessera?: number | null;
+  anno_tessera?: number | null;
   totaleCorse: number;
   ultimaCorsa: string | null;
 }
@@ -35,7 +43,34 @@ export default function PazientiPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
+  // ANNO CORRENTE IMPOSTATO VIA EFFECT PER EVITARE ERRORI NEXT.JS
+  const [currentYear, setCurrentYear] = useState<number>(2024);
+
+  // STATI MODAL MODIFICA / CREAZIONE
+  const [modalAperto, setModalAperto] = useState(false);
+  const [isNuovoPaziente, setIsNuovoPaziente] = useState(false);
+  const [salvataggioInCorso, setSalvataggioInCorso] = useState(false);
+  const [formPaziente, setFormPaziente] = useState<any>({
+    id: "",
+    nome: "",
+    cognome: "",
+    telefono: "",
+    codice_fiscale: "",
+    residenza: "",
+    data_nascita: "",
+    luogo_nascita: "",
+    peso_approssimativo: "",
+    patologia: "",
+    numero_tessera: "",
+    anno_tessera: 2024
+  });
+
   useEffect(() => {
+    // Calcolo sicuro lato client dell'anno
+    const anno = new Date().getFullYear();
+    setCurrentYear(anno);
+    setFormPaziente((prev: any) => ({ ...prev, anno_tessera: anno }));
+
     fetchPazientiEStorico();
   }, []);
 
@@ -50,7 +85,7 @@ export default function PazientiPage() {
 
       if (pErr) throw pErr;
 
-      // 2. Carica prenotazioni per calcolare lo storico
+      // 2. Carica prenotazioni per contatore corse
       const { data: corseList, error: cErr } = await supabase
         .from("prenotazioni")
         .select("paziente_id, data_appuntamento")
@@ -82,33 +117,113 @@ export default function PazientiPage() {
     }
   }
 
-  // MESSAGGIO WHATSAPP COMPLETO E PROFESSIONALE
+  // APRI MODAL MODIFICA
+  const apriModifica = (p: PazienteConStorico) => {
+    setIsNuovoPaziente(false);
+    setFormPaziente({
+      id: p.id,
+      nome: p.nome || "",
+      cognome: p.cognome || "",
+      telefono: p.telefono || "",
+      codice_fiscale: p.codice_fiscale || "",
+      residenza: p.residenza || "",
+      data_nascita: p.data_nascita || "",
+      luogo_nascita: p.luogo_nascita || "",
+      peso_approssimativo: p.peso_approssimativo || "",
+      patologia: p.patologia || "",
+      numero_tessera: p.numero_tessera || "",
+      anno_tessera: p.anno_tessera || currentYear
+    });
+    setModalAperto(true);
+  };
+
+  // APRI MODAL NUOVO PAZIENTE
+  const apriNuovo = () => {
+    setIsNuovoPaziente(true);
+    setFormPaziente({
+      id: "",
+      nome: "",
+      cognome: "",
+      telefono: "",
+      codice_fiscale: "",
+      residenza: "",
+      data_nascita: "",
+      luogo_nascita: "",
+      peso_approssimativo: "",
+      patologia: "",
+      numero_tessera: "",
+      anno_tessera: currentYear
+    });
+    setModalAperto(true);
+  };
+
+  // ASSEGNA AUTOMATICAMENTE IL PROSSIMO NUMERO TESSERA
+  const generaNumeroTesseraAuto = async () => {
+    try {
+      const { data: prossimoNum, error } = await supabase.rpc("genera_prossima_tessera", {
+        tabella: "pazienti",
+        offset_iniziale: 500
+      });
+      if (error) throw error;
+      setFormPaziente((prev: any) => ({
+        ...prev,
+        numero_tessera: prossimoNum,
+        anno_tessera: currentYear
+      }));
+    } catch (err: any) {
+      alert("Errore generazione numero: " + err.message);
+    }
+  };
+
+  // SALVATAGGIO MODIFICHE O NUOVO
+  const handleSalvaPaziente = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSalvataggioInCorso(true);
+
+    const payload = {
+      nome: formPaziente.nome.trim(),
+      cognome: formPaziente.cognome.trim(),
+      telefono: formPaziente.telefono.trim() || null,
+      codice_fiscale: formPaziente.codice_fiscale.trim().toUpperCase() || null,
+      residenza: formPaziente.residenza.trim() || null,
+      data_nascita: formPaziente.data_nascita || null,
+      luogo_nascita: formPaziente.luogo_nascita.trim() || null,
+      peso_approssimativo: formPaziente.peso_approssimativo.trim() || null,
+      patologia: formPaziente.patologia.trim() || null,
+      numero_tessera: formPaziente.numero_tessera ? parseInt(formPaziente.numero_tessera) : null,
+      anno_tessera: formPaziente.anno_tessera ? parseInt(formPaziente.anno_tessera) : currentYear,
+    };
+
+    try {
+      if (isNuovoPaziente) {
+        const { error } = await supabase.from("pazienti").insert([payload]);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("pazienti").update(payload).eq("id", formPaziente.id);
+        if (error) throw error;
+      }
+
+      setModalAperto(false);
+      fetchPazientiEStorico();
+    } catch (err: any) {
+      alert("Errore salvataggio: " + err.message);
+    } finally {
+      setSalvataggioInCorso(false);
+    }
+  };
+
+  // WHATSAPP
   const apriWhatsApp = (p: PazienteConStorico) => {
     if (!p.telefono) return;
-
     let num = p.telefono.replace(/\D/g, "");
     if (num.length === 10 && !num.startsWith("39")) {
       num = "39" + num;
     }
-
-    const ultimaDataFormatted = p.ultimaCorsa
-      ? new Date(p.ultimaCorsa).toLocaleDateString("it-IT")
-      : null;
-
     const messaggio = 
-`🚑 *CENTRALE OPERATIVA Centrale Operativa Roma R.T.A.*
-
-Gentile *${p.nome} ${p.cognome}*${p.codice_fiscale ? ` (C.F.: ${p.codice_fiscale})` : ""},
-La contattiamo dalla nostra Centrale Operativa Roma R.T.A. per i servizi di trasporto sanitario.
-${ultimaDataFormatted ? `\n📌 _Riferimento ultimo servizio registrato: ${ultimaDataFormatted}_` : ""}
-
-Rimaniamo a Sua completa disposizione per:
-• Conferma orari e itinerari
-• Prenotazione nuovi trasporti sanitari / visite / dialisi
-• Variazioni e comunicazioni all'equipaggio
-
-Può rispondere direttamente a questo messaggio per qualsiasi necessità.
-_AmbulancePro - Assistenza Trasporti Sanitari_`;
+      `🚑 *CENTRALE TRASPORTI SANITARI*\n` +
+      `Gentile *${p.nome} ${p.cognome}*,\n` +
+      `La contattiamo dalla centrale operativa per i servizi di trasporto sanitario.\n` +
+      `Restiamo a Sua completa disposizione per conferme o nuovi servizi.`;
 
     window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`, "_blank");
   };
@@ -129,27 +244,36 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-200">
           <div>
             <div className="inline-flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-blue-600 mb-1">
-              <Users size={14} /> Anagrafica Clienti
+              <Users size={14} /> Anagrafica e Tessere
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-              Rubrica Pazienti & Storico
+              Rubrica Pazienti & Soci
             </h1>
             <p className="text-sm text-slate-500">
-              Gestione assistiti censiti: puoi contattarli su WhatsApp o aprire una nuova prenotazione con dati già compilati.
+              Gestisci le schede complete, rilascia le tessere socio e avvia i trasporti sanitari.
             </p>
           </div>
 
-          <Link
-            href="/prenotazione"
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm self-start sm:self-auto"
-          >
-            <PlusCircle size={15} />
-            <span>Nuovo Trasporto</span>
-          </Link>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={apriNuovo}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-slate-900 hover:bg-slate-800 text-white transition shadow-sm"
+            >
+              <UserPlus size={15} />
+              <span>Nuovo Paziente</span>
+            </button>
+            <Link
+              href="/prenotazione"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm"
+            >
+              <PlusCircle size={15} />
+              <span>Nuovo Trasporto</span>
+            </Link>
+          </div>
         </div>
 
         {/* BARRA RICERCA */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
           <Search size={18} className="text-slate-400 shrink-0" />
           <input
             type="text"
@@ -178,12 +302,12 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
           <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
             <Users size={36} className="mx-auto text-slate-300 mb-2" />
             <p className="font-bold text-slate-700">Nessun paziente trovato</p>
-            <p className="text-xs text-slate-400 mt-1">Verifica i parametri di ricerca inseriti.</p>
+            <p className="text-xs text-slate-400 mt-1">Verifica i parametri di ricerca o inseriscine uno nuovo.</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {filteredPazienti.map((p) => {
-              const isAbituale = p.totaleCorse > 1;
+              const haTessera = Boolean(p.numero_tessera);
 
               return (
                 <div
@@ -198,13 +322,10 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
                           <h2 className="text-lg font-bold text-slate-900 leading-tight">
                             {p.nome} {p.cognome}
                           </h2>
-                          {isAbituale ? (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full">
-                              <ShieldCheck size={11} /> Abituale
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full">
-                              Nuovo
+                          {haTessera && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                              <ShieldCheck size={11} className="text-amber-600" />
+                              Socio #{p.numero_tessera}
                             </span>
                           )}
                         </div>
@@ -216,20 +337,23 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
                         )}
                       </div>
 
-                      {/* Badge Totale Corse */}
-                      <div className="text-right shrink-0">
-                        <span className="text-xs font-extrabold text-blue-600 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg block">
-                          {p.totaleCorse} {p.totaleCorse === 1 ? "corsa" : "corse"}
-                        </span>
-                      </div>
+                      {/* Tasto Modifica Anagrafica */}
+                      <button
+                        onClick={() => apriModifica(p)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+                        title="Modifica scheda anagrafica"
+                      >
+                        <Edit size={13} />
+                        <span>Modifica</span>
+                      </button>
                     </div>
 
-                    {/* Metadati Paziente */}
+                    {/* Dati Clinici & Recapiti */}
                     <div className="pt-3 space-y-2 text-xs text-slate-600">
-                      {p.ultimaCorsa && (
-                        <div className="flex items-center gap-1.5 text-slate-500">
-                          <Clock size={13} className="text-slate-400 shrink-0" />
-                          <span>Ultimo trasporto: <strong className="text-slate-700">{new Date(p.ultimaCorsa).toLocaleDateString("it-IT")}</strong></span>
+                      {p.telefono && (
+                        <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                          <Phone size={13} className="text-blue-600 shrink-0" />
+                          <span>{p.telefono}</span>
                         </div>
                       )}
 
@@ -249,37 +373,35 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
                     </div>
                   </div>
 
-                  {/* Pulsanti Rapidi WhatsApp e Nuova Corsa Precompilata */}
-                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
-                    {p.telefono ? (
-                      <div className="flex items-center gap-2">
+                  {/* Barra Azioni */}
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5">
+                      {p.telefono && (
                         <button
                           onClick={() => apriWhatsApp(p)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm"
-                          title="Invia messaggio WhatsApp"
+                          className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition border border-emerald-200"
+                          title="WhatsApp"
                         >
-                          <MessageSquare size={13} />
-                          <span>WhatsApp</span>
+                          <MessageSquare size={14} />
                         </button>
+                      )}
 
-                        <a
-                          href={`tel:${p.telefono}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition"
-                          title="Chiama al cellulare"
+                      {haTessera && (
+                        <Link
+                          href={`/tessera/${p.id}`}
+                          target="_blank"
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition"
+                          title="Vedi Tessera Ufficiale"
                         >
-                          <Phone size={13} />
-                          <span>Chiama</span>
-                        </a>
-                      </div>
-                    ) : (
-                      <span className="text-[11px] text-slate-400 italic">Nessun recapito</span>
-                    )}
+                          <ShieldCheck size={13} className="text-amber-600" />
+                          <span>Tessera</span>
+                        </Link>
+                      )}
+                    </div>
 
-                    {/* LINK DI PRENOTAZIONE CON ID PAZIENTE AGGANCIATO */}
                     <Link
                       href={`/prenotazione?paziente_id=${p.id}`}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition ml-auto"
-                      title="Apri form con dati già compilati"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white transition ml-auto shadow-sm"
                     >
                       <span>Nuova Corsa</span>
                       <ArrowRight size={13} />
@@ -293,6 +415,191 @@ _AmbulancePro - Assistenza Trasporti Sanitari_`;
         )}
 
       </div>
+
+      {/* MODAL MODIFICA / CREAZIONE PAZIENTE COMPLETO */}
+      {modalAperto && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 my-8">
+            
+            {/* Header Modal */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900">
+                  {isNuovoPaziente ? "Inserimento Nuovo Paziente" : "Modifica Scheda Paziente"}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Aggiorna recapiti, patologia e riferimenti della tessera socio.
+                </p>
+              </div>
+              <button
+                onClick={() => setModalAperto(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 transition"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSalvaPaziente} className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Nome *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formPaziente.nome}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, nome: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600 font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Cognome *</label>
+                  <input
+                    type="text"
+                    required
+                    value={formPaziente.cognome}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, cognome: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600 font-semibold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Telefono</label>
+                  <input
+                    type="tel"
+                    placeholder="es. 3331234567"
+                    value={formPaziente.telefono}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, telefono: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Codice Fiscale</label>
+                  <input
+                    type="text"
+                    placeholder="16 caratteri"
+                    value={formPaziente.codice_fiscale}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, codice_fiscale: e.target.value.toUpperCase() })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 font-mono outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Indirizzo di Residenza</label>
+                <input
+                  type="text"
+                  placeholder="Via, Civico, Città"
+                  value={formPaziente.residenza}
+                  onChange={(e) => setFormPaziente({ ...formPaziente, residenza: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Data di Nascita</label>
+                  <input
+                    type="date"
+                    value={formPaziente.data_nascita}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, data_nascita: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">Peso Approx (kg)</label>
+                  <input
+                    type="text"
+                    placeholder="es. 75 kg"
+                    value={formPaziente.peso_approssimativo}
+                    onChange={(e) => setFormPaziente({ ...formPaziente, peso_approssimativo: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Patologia / Segnalazioni Cliniche</label>
+                <textarea
+                  rows={2}
+                  placeholder="Note sulle condizioni sanitarie o mobilità..."
+                  value={formPaziente.patologia}
+                  onChange={(e) => setFormPaziente({ ...formPaziente, patologia: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 outline-none focus:bg-white focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+
+              {/* SEZIONE TESSERA SOCIO SOSTENITORE */}
+              <div className="bg-amber-50/70 p-3.5 rounded-2xl border border-amber-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-amber-900 flex items-center gap-1.5 text-xs">
+                    <ShieldCheck size={15} className="text-amber-600" />
+                    Tessera Socio Sostenitore
+                  </span>
+                  {!formPaziente.numero_tessera && (
+                    <button
+                      type="button"
+                      onClick={generaNumeroTesseraAuto}
+                      className="text-[11px] font-bold text-amber-800 bg-amber-200/60 hover:bg-amber-200 px-2.5 py-1 rounded-lg transition"
+                    >
+                      Assegna Prossimo N°
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-amber-800 uppercase block mb-0.5">N° Tessera</label>
+                    <input
+                      type="number"
+                      placeholder="es. 501"
+                      value={formPaziente.numero_tessera}
+                      onChange={(e) => setFormPaziente({ ...formPaziente, numero_tessera: e.target.value })}
+                      className="w-full bg-white border border-amber-200 rounded-xl p-2 text-xs font-bold font-mono outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-amber-800 uppercase block mb-0.5">Anno Validità</label>
+                    <input
+                      type="number"
+                      value={formPaziente.anno_tessera}
+                      onChange={(e) => setFormPaziente({ ...formPaziente, anno_tessera: e.target.value })}
+                      className="w-full bg-white border border-amber-200 rounded-xl p-2 text-xs font-bold font-mono outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Pulsanti Modal */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setModalAperto(false)}
+                  className="px-4 py-2.5 rounded-xl font-semibold text-slate-600 hover:bg-slate-100 transition"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="submit"
+                  disabled={salvataggioInCorso}
+                  className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl font-bold bg-blue-600 hover:bg-blue-700 text-white transition shadow-sm disabled:opacity-50"
+                >
+                  {salvataggioInCorso ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <Save size={16} />
+                  )}
+                  <span>Salva Scheda</span>
+                </button>
+              </div>
+            </form>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

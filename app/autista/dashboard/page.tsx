@@ -11,7 +11,14 @@ import {
   Clock, 
   AlertCircle, 
   Navigation, 
-  Loader2
+  Loader2,
+  Phone,
+  MessageCircle,
+  Calendar,
+  Wind,
+  Stethoscope,
+  ShieldCheck,
+  RotateCcw
 } from "lucide-react";
 
 export default function AutistaDashboard() {
@@ -19,10 +26,26 @@ export default function AutistaDashboard() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [nomeAutista, setNomeAutista] = useState("");
+  const [tesseraAutista, setTesseraAutista] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // DATA ODIERNA DEFERITA (risolve l'avviso di Next.js)
+  const [today, setToday] = useState<string>("");
+
+  // STATI TAB E FILTRI
+  const [tabAttivo, setTabAttivo] = useState<"oggi" | "future" | "storico">("oggi");
+  const [filtroDataSpecifica, setFiltroDataSpecifica] = useState<string>("");
+
   const router = useRouter();
 
   useEffect(() => {
+    // Calcoliamo la data odierna sul client
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    setToday(`${year}-${month}-${day}`);
+
     const autistaId = localStorage.getItem("autista_id");
     const nome = localStorage.getItem("autista_nome");
 
@@ -32,16 +55,32 @@ export default function AutistaDashboard() {
     }
 
     setNomeAutista(nome || "Operatore");
+    fetchDatiAutista(autistaId);
     fetchMieCorse(autistaId);
   }, [router]);
+
+  async function fetchDatiAutista(id: string) {
+    try {
+      const { data } = await supabase
+        .from("autisti")
+        .select("numero_tessera, anno_tessera")
+        .eq("id", id)
+        .single();
+
+      if (data?.numero_tessera) {
+        setTesseraAutista(`${data.numero_tessera}/${data.anno_tessera || ""}`);
+      }
+    } catch {
+      // Non bloccante
+    }
+  }
 
   async function fetchMieCorse(id: string) {
     try {
       setLoading(true);
-      // Ripristinata la selezione sicura compatibile con la tua struttura Supabase
       const { data, error: dbError } = await supabase
         .from("prenotazioni")
-        .select(`*, pazienti(nome, cognome)`)
+        .select(`*, pazienti(*)`)
         .eq("autista_id", id)
         .order("data_appuntamento", { ascending: true })
         .order("ora_appuntamento", { ascending: true });
@@ -86,11 +125,92 @@ export default function AutistaDashboard() {
     }
   }
 
-  const apriNavigatore = (via?: string, citta?: string) => {
-    if (!citta && !via) return;
-    const query = encodeURIComponent(`${via || ""} ${citta || ""}`.trim());
+  const apriNavigatore = (via?: string, civico?: string, citta?: string) => {
+    if (!via && !citta) return;
+    const query = encodeURIComponent(`${via || ""} ${civico || ""}, ${citta || ""}`.trim());
     window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, "_blank");
   };
+
+  // 1. MESSAGGIO RAPIDO DI ARRIVO
+  const inviaWhatsAppArrivo = (corsa: any) => {
+    if (!corsa?.pazienti?.telefono) {
+      alert("Nessun recapito telefonico memorizzato per questo paziente.");
+      return;
+    }
+    const cleanPhone = corsa.pazienti.telefono.replace(/\D/g, "");
+    const numero = cleanPhone.startsWith("39") ? cleanPhone : `39${cleanPhone}`;
+    const msg = `Buongiorno ${corsa.pazienti.nome}, sono l'autista dell'ambulanza. Ti avviso che siamo in arrivo per il tuo trasporto sanitario.`;
+    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
+  // 2. INVIA TESSERA SOCIO SOSTENITORE (GENERA SE MANCA E MANDA LINK UFFICIALE)
+  const inviaTesseraWhatsApp = async (corsa: any) => {
+    if (!corsa?.pazienti?.telefono) {
+      alert("Nessun recapito telefonico registrato per questo paziente.");
+      return;
+    }
+
+    let numTessera = corsa.pazienti.numero_tessera;
+    const annoTessera = corsa.pazienti.anno_tessera || new Date().getFullYear();
+
+    // Se il paziente non ha ancora una tessera, la generiamo all'istante
+    if (!numTessera) {
+      try {
+        const { data: prossimoNum, error: rpcErr } = await supabase.rpc("genera_prossima_tessera", {
+          tabella: "pazienti",
+          offset_iniziale: 500
+        });
+
+        if (rpcErr) throw rpcErr;
+
+        numTessera = prossimoNum;
+        await supabase
+          .from("pazienti")
+          .update({
+            numero_tessera: prossimoNum,
+            anno_tessera: annoTessera,
+            data_tesseramento: new Date().toISOString().split("T")[0]
+          })
+          .eq("id", corsa.pazienti.id);
+
+        // Aggiorniamo localmente
+        corsa.pazienti.numero_tessera = prossimoNum;
+        corsa.pazienti.anno_tessera = annoTessera;
+      } catch (e: any) {
+        console.error("Errore generazione tessera:", e);
+      }
+    }
+
+    const cleanPhone = corsa.pazienti.telefono.replace(/\D/g, "");
+    const numero = cleanPhone.startsWith("39") ? cleanPhone : `39${cleanPhone}`;
+    const linkTessera = `${window.location.origin}/tessera/${corsa.pazienti.id}`;
+
+    const msg = 
+      `🚑 *TESSERA SOCIO SOSTENITORE*\n\n` +
+      `Gentile *${corsa.pazienti.nome} ${corsa.pazienti.cognome}*,\n` +
+      `ecco la Sua tessera annuale ufficiale:\n\n` +
+      `💳 *Tessera N°:* #${numTessera || "In emissione"}/${annoTessera}\n` +
+      `📅 *Validità:* fino al 31/12/${annoTessera}\n\n` +
+      `👉 *Apri, salva o stampa la tua tessera digitale:*\n${linkTessera}\n\n` +
+      `Grazie di cuore per il vostro prezioso sostegno!`;
+
+    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
+  // DIVISIONE IN CATEGORIE (OGGI, FUTURE, STORICO)
+  const corseOggi = today ? corse.filter(c => c.data_appuntamento === today && !c.ora_fine_effettiva) : [];
+  const corseFuture = today ? corse.filter(c => c.data_appuntamento > today) : [];
+  const corseStorico = today ? corse.filter(c => Boolean(c.ora_fine_effettiva) || c.data_appuntamento < today) : [];
+
+  // APPLICAZIONE FILTRO ATTIVO
+  let corseVisualizzate = [];
+  if (filtroDataSpecifica) {
+    corseVisualizzate = corse.filter(c => c.data_appuntamento === filtroDataSpecifica);
+  } else {
+    if (tabAttivo === "oggi") corseVisualizzate = corseOggi;
+    else if (tabAttivo === "future") corseVisualizzate = corseFuture;
+    else corseVisualizzate = corseStorico;
+  }
 
   if (loading) {
     return (
@@ -132,7 +252,7 @@ export default function AutistaDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-12">
+    <div className="min-h-screen bg-slate-100 pb-16">
       
       {/* TESTATA OPERATIVA DI BORDO */}
       <header className="bg-slate-900 text-white sticky top-0 z-30 shadow-md border-b border-slate-800">
@@ -145,6 +265,11 @@ export default function AutistaDashboard() {
               <div className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">In Servizio</span>
+                {tesseraAutista && (
+                  <span className="text-[10px] font-bold px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded border border-amber-500/30">
+                    Socio #{tesseraAutista}
+                  </span>
+                )}
               </div>
               <h1 className="text-base font-bold text-white leading-tight">
                 {nomeAutista}
@@ -166,36 +291,102 @@ export default function AutistaDashboard() {
       {/* CONTENUTO DASHBOARD */}
       <main className="max-w-2xl mx-auto p-4 space-y-4">
         
-        {/* TITOLO SEZIONE */}
-        <div className="flex justify-between items-center pt-2">
-          <div className="flex items-center gap-2 text-slate-800 font-bold text-base">
-            <Clock size={18} className="text-blue-600" />
-            <span>Missioni Assegnate</span>
+        {/* SELEZIONE TABS (OGGI / FUTURE / STORICO) */}
+        <div className="bg-white p-1 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-3 gap-1">
+          <button
+            onClick={() => { setTabAttivo("oggi"); setFiltroDataSpecifica(""); }}
+            className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              tabAttivo === "oggi" && !filtroDataSpecifica
+                ? "bg-blue-600 text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <span>Oggi</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+              tabAttivo === "oggi" && !filtroDataSpecifica ? "bg-white text-blue-700" : "bg-slate-200 text-slate-700"
+            }`}>
+              {corseOggi.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => { setTabAttivo("future"); setFiltroDataSpecifica(""); }}
+            className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              tabAttivo === "future" && !filtroDataSpecifica
+                ? "bg-blue-600 text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <span>Future</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+              tabAttivo === "future" && !filtroDataSpecifica ? "bg-white text-blue-700" : "bg-slate-200 text-slate-700"
+            }`}>
+              {corseFuture.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => { setTabAttivo("storico"); setFiltroDataSpecifica(""); }}
+            className={`py-2 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 ${
+              tabAttivo === "storico" && !filtroDataSpecifica
+                ? "bg-blue-600 text-white shadow"
+                : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            <span>Storico</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+              tabAttivo === "storico" && !filtroDataSpecifica ? "bg-white text-blue-700" : "bg-slate-200 text-slate-700"
+            }`}>
+              {corseStorico.length}
+            </span>
+          </button>
+        </div>
+
+        {/* FILTRO PER DATA RAPIDA */}
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2 text-slate-600 font-semibold shrink-0">
+            <Calendar size={16} className="text-blue-600" />
+            <span>Filtra Data:</span>
           </div>
-          <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-200 text-slate-700">
-            {corse.length} {corse.length === 1 ? "corsa" : "corse"}
-          </span>
+          <div className="flex items-center gap-2 w-full">
+            <input
+              type="date"
+              value={filtroDataSpecifica}
+              onChange={(e) => setFiltroDataSpecifica(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-600"
+            />
+            {filtroDataSpecifica && (
+              <button
+                onClick={() => setFiltroDataSpecifica("")}
+                className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg shrink-0 border border-slate-200"
+                title="Azzera filtro data"
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* LISTA DELLE MISSIONI */}
         <div className="space-y-4">
-          {corse.length === 0 ? (
+          {corseVisualizzate.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl text-center text-slate-500 border border-slate-200 space-y-2">
               <CheckCircle2 size={36} className="mx-auto text-emerald-500 mb-2" />
-              <p className="font-bold text-slate-800">Nessuna missione in coda</p>
-              <p className="text-xs text-slate-400">Tutti i trasporti assegnati sono stati completati.</p>
+              <p className="font-bold text-slate-800">Nessuna missione trovata</p>
+              <p className="text-xs text-slate-400">Nessuna corsa corrisponde alla vista selezionata.</p>
             </div>
           ) : (
-            corse.map((corsa) => {
+            corseVisualizzate.map((corsa) => {
               const haIniziato = Boolean(corsa.ora_inizio_effettiva);
               const haFinito = Boolean(corsa.ora_fine_effettiva);
               const isInCorso = haIniziato && !haFinito;
               const isWorking = actionLoading === corsa.id;
+              const haTessera = corsa.pazienti?.numero_tessera;
 
               return (
                 <div
                   key={corsa.id}
-                  className={`bg-white rounded-2xl p-5 shadow-sm border transition-all ${
+                  className={`bg-white rounded-2xl p-5 shadow-sm border transition-all space-y-3.5 ${
                     isInCorso 
                       ? "border-amber-400 ring-2 ring-amber-400/20" 
                       : haFinito 
@@ -205,81 +396,170 @@ export default function AutistaDashboard() {
                 >
                   
                   {/* INTESTAZIONE SCHEDA */}
-                  <div className="flex justify-between items-start border-b border-slate-100 pb-3 mb-3">
+                  <div className="flex justify-between items-start border-b border-slate-100 pb-3">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xl font-black text-slate-900 tracking-tight">
+                        <span className="text-2xl font-black text-slate-900 tracking-tight">
                           {corsa.ora_appuntamento || "--:--"}
                         </span>
                         {isInCorso && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full border border-amber-300">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full border border-amber-300">
                             <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-ping"></span>
-                            In Corso
+                            In Viaggio
                           </span>
                         )}
                         {haFinito && (
                           <span className="text-[10px] font-bold uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">
-                            Chiusa
+                            Completata
                           </span>
                         )}
                       </div>
-                      <div className="font-bold text-slate-800 text-base mt-0.5">
-                        {corsa.pazienti ? `${corsa.pazienti.nome} ${corsa.pazienti.cognome}` : "Paziente non specificato"}
+                      
+                      <div className="font-bold text-slate-900 text-base mt-1 flex items-center gap-1.5">
+                        <span>{corsa.pazienti ? `${corsa.pazienti.nome} ${corsa.pazienti.cognome}` : "Paziente non specificato"}</span>
                       </div>
+
+                      {haTessera && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md mt-1">
+                          <ShieldCheck size={11} className="text-amber-600" />
+                          SOCIO N° #{corsa.pazienti.numero_tessera}/{corsa.pazienti.anno_tessera || ""}
+                        </span>
+                      )}
                     </div>
 
-                    <div className="text-right text-xs text-slate-500 font-medium">
+                    <div className="text-right text-xs font-semibold text-slate-500">
                       {corsa.data_appuntamento ? new Date(corsa.data_appuntamento).toLocaleDateString("it-IT") : ""}
                     </div>
                   </div>
 
-                  {/* ITINERARIO E NAVIGAZIONE GOOGLE MAPS */}
-                  <div className="space-y-2.5 text-xs text-slate-700">
+                  {/* BADGE DI TRASPORTO (OSSIGENO, MEDICO) */}
+                  <div className="flex flex-wrap gap-1.5 text-xs">
+                    {corsa.serve_ossigeno && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold bg-cyan-50 text-cyan-800 border border-cyan-200 text-[11px]">
+                        <Wind size={13} /> Serve Ossigeno
+                      </span>
+                    )}
+                    {corsa.serve_medico && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold bg-purple-50 text-purple-800 border border-purple-200 text-[11px]">
+                        <Stethoscope size={13} /> Medico Necessario
+                      </span>
+                    )}
+                  </div>
+
+                  {/* CLINICO E NOTE */}
+                  {(corsa.pazienti?.patologia || corsa.note) && (
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs space-y-1">
+                      {corsa.pazienti?.patologia && (
+                        <div className="text-slate-700">
+                          <span className="font-bold text-slate-900">Patologia: </span>
+                          {corsa.pazienti.patologia}
+                        </div>
+                      )}
+                      {corsa.note && (
+                        <div className="text-slate-700">
+                          <span className="font-bold text-slate-900">Note: </span>
+                          {corsa.note}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* ITINERARIO E NAVIGAZIONE 1-TAP GOOGLE MAPS */}
+                  <div className="space-y-2 text-xs text-slate-700">
                     {/* Partenza */}
-                    <div className="flex items-start justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
                       <div className="flex items-start gap-2">
-                        <MapPin size={15} className="text-blue-600 mt-0.5 shrink-0" />
+                        <MapPin size={16} className="text-blue-600 mt-0.5 shrink-0" />
                         <div>
-                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Ritiro</span>
-                          <span className="font-semibold text-slate-900">
-                            {corsa.partenza_via ? `${corsa.partenza_via}, ${corsa.partenza_civico || ""}` : ""}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold uppercase text-blue-700">Ritiro</span>
+                            <span className="text-[10px] text-slate-400">
+                              {corsa.partenza_piano ? `P.${corsa.partenza_piano}` : "P.Terra"} {corsa.partenza_ascensore ? "• Ascensore" : "• No Ascensore"}
+                            </span>
+                          </div>
+                          <span className="font-bold text-slate-900 block text-xs">
+                            {corsa.partenza_via ? `${corsa.partenza_via}, ${corsa.partenza_civico || ""}` : "Indirizzo non inserito"}
                           </span>
-                          <span className="text-slate-600 block">{corsa.partenza_citta}</span>
+                          <span className="text-slate-500 block text-[11px]">{corsa.partenza_citta}</span>
+                          {corsa.partenza_dettagli_ospedale && (
+                            <span className="text-[10px] font-semibold text-blue-800 block mt-0.5">
+                              {corsa.partenza_dettagli_ospedale}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
-                        onClick={() => apriNavigatore(corsa.partenza_via, corsa.partenza_citta)}
-                        className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg shrink-0 transition"
-                        title="Naviga verso la partenza"
+                        onClick={() => apriNavigatore(corsa.partenza_via, corsa.partenza_civico, corsa.partenza_citta)}
+                        className="p-2.5 text-blue-700 bg-blue-100/80 hover:bg-blue-200 rounded-xl shrink-0 transition flex items-center gap-1 font-bold text-xs"
+                        title="Avvia Google Maps"
                       >
-                        <Navigation size={16} />
+                        <Navigation size={15} /> Maps
                       </button>
                     </div>
 
                     {/* Arrivo */}
-                    <div className="flex items-start justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
                       <div className="flex items-start gap-2">
-                        <MapPin size={15} className="text-emerald-600 mt-0.5 shrink-0" />
+                        <MapPin size={16} className="text-emerald-600 mt-0.5 shrink-0" />
                         <div>
-                          <span className="text-[10px] font-bold uppercase text-slate-400 block">Destinazione</span>
-                          <span className="font-semibold text-slate-900">
-                            {corsa.arrivo_via ? `${corsa.arrivo_via}, ${corsa.arrivo_civico || ""}` : ""}
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[10px] font-bold uppercase text-emerald-700">Destinazione</span>
+                            <span className="text-[10px] text-slate-400">
+                              {corsa.arrivo_piano ? `P.${corsa.arrivo_piano}` : "P.Terra"} {corsa.arrivo_ascensore ? "• Ascensore" : "• No Ascensore"}
+                            </span>
+                          </div>
+                          <span className="font-bold text-slate-900 block text-xs">
+                            {corsa.arrivo_via ? `${corsa.arrivo_via}, ${corsa.arrivo_civico || ""}` : "Indirizzo non inserito"}
                           </span>
-                          <span className="text-slate-600 block">{corsa.arrivo_citta}</span>
+                          <span className="text-slate-500 block text-[11px]">{corsa.arrivo_citta}</span>
+                          {corsa.arrivo_dettagli_ospedale && (
+                            <span className="text-[10px] font-semibold text-emerald-800 block mt-0.5">
+                              {corsa.arrivo_dettagli_ospedale}
+                            </span>
+                          )}
                         </div>
                       </div>
                       <button
-                        onClick={() => apriNavigatore(corsa.arrivo_via, corsa.arrivo_citta)}
-                        className="p-2 text-emerald-600 bg-emerald-50 hover:bg-emerald-100 rounded-lg shrink-0 transition"
-                        title="Naviga verso la destinazione"
+                        onClick={() => apriNavigatore(corsa.arrivo_via, corsa.arrivo_civico, corsa.arrivo_citta)}
+                        className="p-2.5 text-emerald-700 bg-emerald-100/80 hover:bg-emerald-200 rounded-xl shrink-0 transition flex items-center gap-1 font-bold text-xs"
+                        title="Avvia Google Maps"
                       >
-                        <Navigation size={16} />
+                        <Navigation size={15} /> Maps
                       </button>
                     </div>
                   </div>
 
-                  {/* PULSANTI OPERATIVI */}
-                  <div className="pt-3 border-t border-slate-100">
+                  {/* CONTATTO RAPIDO PAZIENTE + INVIA TESSERA SEPARATA */}
+                  {corsa.pazienti?.telefono && (
+                    <div className="space-y-2 pt-1">
+                      <div className="grid grid-cols-2 gap-2">
+                        <a
+                          href={`tel:${corsa.pazienti.telefono}`}
+                          className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs transition"
+                        >
+                          <Phone size={14} className="text-blue-600" /> Chiama
+                        </a>
+                        <button
+                          onClick={() => inviaWhatsAppArrivo(corsa)}
+                          className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 font-bold text-xs transition"
+                        >
+                          <MessageCircle size={14} className="text-blue-600" /> Avviso Arrivo
+                        </button>
+                      </div>
+
+                      {/* PULSANTE TESSERA SOCIO SOSTENITORE */}
+                      <button
+                        onClick={() => inviaTesseraWhatsApp(corsa)}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold text-xs shadow-sm transition active:scale-[0.98]"
+                      >
+                        <ShieldCheck size={16} /> 
+                        <span>Invia Tessera Socio al Paziente</span>
+                      </button>
+                    </div>
+                  )}
+
+                  {/* PULSANTI OPERATIVI INIZIO / FINE */}
+                  <div className="pt-2 border-t border-slate-100">
                     {!haIniziato ? (
                       <button
                         disabled={isWorking}
@@ -291,7 +571,7 @@ export default function AutistaDashboard() {
                         ) : (
                           <>
                             <Play size={18} fill="currentColor" />
-                            <span>AVVIA MISSIONE</span>
+                            <span>AVVIA CORSA</span>
                           </>
                         )}
                       </button>
@@ -306,14 +586,14 @@ export default function AutistaDashboard() {
                         ) : (
                           <>
                             <CheckCircle2 size={18} />
-                            <span>TERMINA MISSIONE</span>
+                            <span>TERMINA CORSA</span>
                           </>
                         )}
                       </button>
                     ) : (
-                      <div className="w-full bg-slate-100 text-slate-500 py-3 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-200">
-                        <CheckCircle2 size={15} className="text-emerald-600" />
-                        <span>Missione registrata e completata</span>
+                      <div className="w-full bg-slate-100 text-slate-500 py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-1.5 border border-slate-200">
+                        <CheckCircle2 size={14} className="text-emerald-600" />
+                        <span>Missione conclusa</span>
                       </div>
                     )}
                   </div>

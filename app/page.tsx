@@ -1,46 +1,171 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   PlusCircle, 
-  CalendarDays, 
   Users, 
   FileSpreadsheet, 
   ArrowUpRight, 
   Ambulance, 
   ShieldCheck,
-  ClipboardList
+  ClipboardList,
+  Lock,
+  KeyRound,
+  LogOut,
+  AlertCircle
 } from "lucide-react";
 
+const MASTER_PIN = "1972";
+
 export default function HomePage() {
+  const [autenticato, setAutenticato] = useState<boolean | null>(null);
+  const [pinInserito, setPinInserito] = useState("");
+  const [errorePin, setErrorePin] = useState(false);
+
+  useEffect(() => {
+    // Verifica se la centrale è già stata sbloccata in questa sessione
+    const isAuth = sessionStorage.getItem("centrale_sbloccata") === "true";
+    setAutenticato(isAuth);
+  }, []);
+
+  const handleVerificaPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pinInserito === MASTER_PIN) {
+      sessionStorage.setItem("centrale_sbloccata", "true");
+      setAutenticato(true);
+      setErrorePin(false);
+      setPinInserito("");
+    } else {
+      setErrorePin(true);
+      setPinInserito("");
+    }
+  };
+
+  const handleBloccaSchermo = () => {
+    sessionStorage.removeItem("centrale_sbloccata");
+    setAutenticato(false);
+  };
+
+  // SCHERMATA DI CARICAMENTO INIZIALE RAPIDA
+  if (autenticato === null) {
+    return <div className="min-h-screen bg-slate-900" />;
+  }
+
+  // 1. SCHERMATA DI BLOCCO PIN (Se non ancora sbloccato)
+  if (!autenticato) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="w-full max-w-sm bg-white rounded-3xl p-7 shadow-2xl border border-slate-800 text-center space-y-6">
+          
+          <div className="w-16 h-16 bg-blue-50 border border-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+            <Lock size={28} strokeWidth={2.2} />
+          </div>
+
+          <div>
+            <h1 className="text-xl font-extrabold text-slate-900">
+              Centrale Operativa
+            </h1>
+            <p className="text-xs text-slate-500 mt-1">
+              Inserisci il PIN master di sicurezza per accedere
+            </p>
+          </div>
+
+          {errorePin && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 text-left animate-shake">
+              <AlertCircle size={15} className="shrink-0 text-rose-600" />
+              <span>PIN non valido. Riprova.</span>
+            </div>
+          )}
+
+          <form onSubmit={handleVerificaPin} className="space-y-4">
+            <input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              placeholder="••••"
+              value={pinInserito}
+              onChange={(e) => {
+                setErrorePin(false);
+                setPinInserito(e.target.value.replace(/\D/g, "").slice(0, 4));
+              }}
+              autoFocus
+              className="w-full text-center text-3xl font-mono tracking-[0.5em] py-3.5 bg-slate-50 border-2 border-slate-200 rounded-2xl focus:bg-white focus:border-blue-600 focus:ring-4 focus:ring-blue-600/10 outline-none transition"
+            />
+
+            <button
+              type="submit"
+              disabled={pinInserito.length < 4}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3.5 rounded-xl font-bold text-sm shadow-sm transition active:scale-95 disabled:opacity-50"
+            >
+              Sblocca Centrale
+            </button>
+          </form>
+
+          {/* Tastierino numerico rapido */}
+          <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100">
+            {["1", "2", "3", "4", "5", "6", "7", "8", "9", "C", "0", "OK"].map((btn) => (
+              <button
+                key={btn}
+                type="button"
+                onClick={() => {
+                  if (btn === "C") setPinInserito("");
+                  else if (btn === "OK") {
+                    if (pinInserito === MASTER_PIN) {
+                      sessionStorage.setItem("centrale_sbloccata", "true");
+                      setAutenticato(true);
+                    } else {
+                      setErrorePin(true);
+                      setPinInserito("");
+                    }
+                  } else {
+                    if (pinInserito.length < 4) setPinInserito((prev) => prev + btn);
+                  }
+                }}
+                className="py-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-800 font-bold text-sm transition"
+              >
+                {btn}
+              </button>
+            ))}
+          </div>
+
+        </div>
+      </div>
+    );
+  }
+
+  // 2. DASHBOARD OPERATIVA PRINCIPALE (Sbloccata)
   const cards = [
     {
       href: "/prenotazione",
       title: "Nuova Prenotazione",
-      description: "Inserisci i dati del paziente, gli indirizzi di prelievo e assegna l'equipaggio.",
+      description: "Inserisci i dati della chiamata, calcola tariffe e orari di trasporto.",
       icon: PlusCircle,
       badge: "Accettazione",
       iconColor: "text-blue-600 bg-blue-50 border-blue-100",
     },
     {
-      href: "/agenda",
-      title: "Agenda di Oggi",
-      description: "Consulta i servizi programmati per il turno odierno e monitora gli orari.",
-      icon: CalendarDays,
-      badge: "Turno Giornaliero",
+      href: "/prenotazioni",
+      title: "Quadro Operativo Corse",
+      description: "Turno odierno, chiamate da assegnare e archivio storico con riassegnazione rapida.",
+      icon: ClipboardList,
+      badge: "Centrale Servizi",
       iconColor: "text-emerald-600 bg-emerald-50 border-emerald-100",
     },
     {
-      href: "/prenotazioni",
-      title: "Archivio Corse",
-      description: "Elenco generale di tutti i trasporti con filtri per autista, data e stato pagamenti.",
-      icon: ClipboardList,
-      badge: "Database Servizi",
+      href: "/pazienti",
+      title: "Rubrica Pazienti & Soci",
+      description: "Anagrafica assistiti, condizioni cliniche, storico e rilascio tessere socio.",
+      icon: Users,
+      badge: "Anagrafica & Tessere",
       iconColor: "text-indigo-600 bg-indigo-50 border-indigo-100",
     },
     {
       href: "/autisti",
       title: "Gestione Personale",
       description: "Anagrafica autisti e soccorritori, recapiti telefonici e PIN operativi di bordo.",
-      icon: Users,
+      icon: ShieldCheck,
       badge: "Staff & Risorse",
       iconColor: "text-amber-600 bg-amber-50 border-amber-100",
     },
@@ -77,11 +202,11 @@ export default function HomePage() {
               Pannello di Controllo <span className="text-blue-400">AmbulancePro</span>
             </h1>
             <p className="text-sm text-slate-400 leading-relaxed">
-              Gestione centralizzata dei trasporti sanitari ordinari, dialisi, dimissioni ospedaliere e servizi d'urgenza programmata.
+              Gestione unificata dei trasporti sanitari, assegnazione equipaggi e anagrafica tessere soci sostenitori.
             </p>
           </div>
 
-          <div className="flex md:flex-col justify-end gap-2 text-right">
+          <div className="flex items-center gap-3 self-start md:self-auto">
             <Link
               href="/prenotazione"
               className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition shadow-sm"
@@ -89,10 +214,20 @@ export default function HomePage() {
               <PlusCircle size={16} />
               <span>Nuovo Servizio</span>
             </Link>
+
+            {/* Tasto Blocca Schermo */}
+            <button
+              onClick={handleBloccaSchermo}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
+              title="Blocca postazione centrale"
+            >
+              <Lock size={15} />
+              <span>Blocca</span>
+            </button>
           </div>
         </div>
 
-        {/* GRIGLIA FUNZIONALITÀ */}
+        {/* GRIGLIA FUNZIONALITÀ OTTIMIZZATA (6 SCHEDE CHIARE) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {cards.map((card) => {
             const Icon = card.icon;
