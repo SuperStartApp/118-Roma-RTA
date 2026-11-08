@@ -121,6 +121,9 @@ test("Auth: controllo periodico preserva il modulo, revoca e cambio account lo c
 test("Auth: pagina operativa non montata senza autorizzazione; area autista sempre sospesa", () => {
   const React = require("react");
   const { renderToStaticMarkup } = require("react-dom/server");
+  const HomePage = carica("app/page.tsx", {
+    "next/link": { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) },
+  }).default;
   for (const stato of ["verifica", "anonimo", "negato", "errore", "autorizzato"]) {
     for (const pathname of ["/", "/pazienti", "/prenotazione", "/prenotazioni/id", "/report", "/agenda", "/tessera/id", "/autisti", "/autista", "/autista/dashboard"]) {
       let montaggi = 0;
@@ -132,10 +135,13 @@ test("Auth: pagina operativa non montata senza autorizzazione; area autista semp
         "@/app/lib/accesso-centrale": { creaAccessoCentrale },
         "@/app/autista/page": { __esModule: true, default: () => React.createElement("p", null, "PIN sospeso") },
       }).default;
-      function Operativa() { montaggi++; return React.createElement("p", null, "Dati operativi simulati"); }
+      function Operativa() { montaggi++; return React.createElement(HomePage); }
       const html = renderToStaticMarkup(React.createElement(Gate, null, React.createElement(Operativa)));
       const driver = pathname === "/autista" || pathname.startsWith("/autista/");
       assert.equal(montaggi, stato === "autorizzato" && !driver ? 1 : 0, `${stato} ${pathname}`);
+      assert.equal(html.includes("Nuovo trasporto"), stato === "autorizzato" && !driver);
+      assert.ok(!html.includes("PIN master"));
+      assert.ok(!html.includes("Sblocca Centrale"));
       if (driver) assert.ok(html.includes("PIN sospeso"));
     }
   }
