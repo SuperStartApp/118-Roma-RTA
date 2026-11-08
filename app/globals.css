@@ -3,6 +3,11 @@
 :root {
   --background: #f8fafc; /* Grigio chiarissimo elegante (slate-50) */
   --foreground: #0f172a; /* Nero ardesia professionale (slate-900) */
+  --rta-operativo: #1d4ed8;
+  --rta-conferma: #047857;
+  --rta-avviso: #b45309;
+  --rta-errore: #be123c;
+  --rta-secondario: #475569;
 }
 
 @theme inline {
@@ -29,4 +34,70 @@ html, body {
 ::-webkit-scrollbar-thumb {
   background: #cbd5e1;
   border-radius: 9999px;
+}
+
+.rta-primary-action {
+  background-color: var(--rta-operativo);
+  color: #fff;
+  transition: background-color 150ms ease;
+}
+
+.rta-primary-action:hover {
+  background-color: #1e40af;
+}
+
+.rta-dashboard-card {
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.rta-dashboard-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 4px 12px rgb(15 23 42 / 8%);
+}
+
+.rta-primary-action:focus-visible,
+.rta-dashboard-card:focus-visible {
+  outline: 3px solid var(--rta-operativo);
+  outline-offset: 4px;
+}
+
+@page tessera-associativa {
+  size: A4 portrait;
+  margin: 14mm;
+}
+
+@media print {
+  body:has([data-stampa-tessera]) {
+    page: tessera-associativa;
+    display: block;
+    min-height: 0;
+    background: white;
+  }
+
+  body:has([data-stampa-tessera]) > header,
+  body:has([data-stampa-tessera]) > nav,
+  [data-stampa-tessera] button,
+  [data-stampa-tessera] [data-no-stampa] {
+    display: none !important;
+  }
+
+  body:has([data-stampa-tessera]) > main {
+    padding: 0;
+  }
+
+  [data-stampa-tessera] {
+    min-height: 0;
+    padding: 0;
+    background: white;
+  }
+
+  [data-stampa-tessera] .rta-tessera-document {
+    max-width: 182mm;
+    padding: 8mm;
+    margin: 0 auto;
+    box-shadow: none;
+    break-inside: avoid;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 }

@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
+import ErroreCaricamento from "@/components/ErroreCaricamento";
+import { associazione } from "@/app/lib/associazione";
+import { statoPrenotazione, rimborsoPendente, riepilogoEconomico, formattaImporto, costoValido } from "@/app/lib/stato-prenotazione";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable"; // <--- Import corretto per Next.js / Turbopack
@@ -11,9 +14,6 @@ import {
   Calendar, 
   Filter, 
   FileText, 
-  Euro, 
-  Clock, 
-  CheckCircle2, 
   Loader2,
   RotateCcw
 } from "lucide-react";
@@ -21,6 +21,7 @@ import {
 export default function ReportPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
 
@@ -28,22 +29,24 @@ export default function ReportPage() {
     fetchData();
   }, []);
 
-  async function fetchData() {
+  async function fetchData(dateFilters = { startDate, endDate }) {
     setLoading(true);
+    setErroreCaricamento(null);
     try {
       let query = supabase
         .from("prenotazioni")
         .select(`*, pazienti(nome, cognome), autisti(nome, cognome)`)
         .order("data_appuntamento", { ascending: false });
 
-      if (startDate) query = query.gte("data_appuntamento", startDate);
-      if (endDate) query = query.lte("data_appuntamento", endDate);
+      if (dateFilters.startDate) query = query.gte("data_appuntamento", dateFilters.startDate);
+      if (dateFilters.endDate) query = query.lte("data_appuntamento", dateFilters.endDate);
 
       const { data: result, error } = await query;
       if (error) throw error;
       setData(result || []);
     } catch (err) {
       console.error(err);
+      setErroreCaricamento("Impossibile caricare i report. Verifica la connessione e riprova.");
     } finally {
       setLoading(false);
     }
@@ -52,14 +55,20 @@ export default function ReportPage() {
   const resetFilters = () => {
     setStartDate("");
     setEndDate("");
-    setTimeout(() => {
-      fetchData();
-    }, 0);
+    void fetchData({ startDate: "", endDate: "" });
   };
 
   // KPI Economici
-  const totaleFatturato = data.reduce((acc, curr) => acc + (Number(curr.costo) || 0), 0);
-  const corseCompletate = data.filter((c) => Boolean(c.ora_fine_effettiva)).length;
+  const totali = riepilogoEconomico(data);
+  const indicatori = [
+    { label: "Valore corse attive", value: totali.valoreAttive },
+    { label: "Da incassare (corse attive)", value: totali.daIncassare },
+    { label: "Incassi registrati", value: totali.incassiRegistrati },
+    { label: "Rimborsi da effettuare", value: totali.rimborsiPendenti },
+    { label: "Rimborsi effettuati", value: totali.rimborsiEffettuati },
+    { label: "Saldo netto", value: totali.saldoNetto },
+  ];
+  const corseCompletate = data.filter((c) => !c.annullata_il && Boolean(c.ora_fine_effettiva)).length;
 
   // 1. EXPORT EXCEL
   const exportToExcel = () => {
@@ -69,9 +78,14 @@ export default function ReportPage() {
       Paziente: `${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`.trim(),
       Autista: item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non assegnato",
       Costo_Euro: item.costo || 0,
-      Pagamento: item.pagato ? "Pagato" : "Da Saldare",
+      Incasso_Originale: item.pagato ? "Incassato" : "Non incassato",
+      Stato_Prenotazione: statoPrenotazione(item),
+      Annullata_Il: item.annullata_il || "",
+      Rimborso_Effettuato_Il: item.rimborso_effettuato_il || "",
+      Rimborso_Pendente_Euro: rimborsoPendente(item) ? item.costo : 0,
+      Rimborso_Effettuato_Euro: item.annullata_il && item.pagato && item.rimborso_effettuato_il ? item.costo : 0,
       Metodo: item.metodo_pagamento || "N/D",
-      Stato: !item.ora_inizio_effettiva
+      Stato: item.annullata_il ? "Annullata" : !item.ora_inizio_effettiva
         ? "In Attesa"
         : !item.ora_fine_effettiva
         ? "In Corso"
@@ -91,6 +105,7 @@ export default function ReportPage() {
     const worksheet = XLSX.utils.json_to_sheet(excelData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Rendiconto Servizi");
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(indicatori.map((i) => ({ Voce: i.label, Euro: i.value }))), "Riepilogo economico");
     XLSX.writeFile(workbook, `Report_Ambulanze_${new Date().toISOString().split("T")[0]}.xlsx`);
   };
 
@@ -107,20 +122,23 @@ export default function ReportPage() {
     const periodo = startDate && endDate ? `Dal ${startDate} al ${endDate}` : "Tutto lo storico disponibile";
     doc.text(`Periodo di riferimento: ${periodo}  |  Generato il: ${new Date().toLocaleDateString("it-IT")}`, 14, 25);
 
-    const tableColumn = ["Data", "Paziente", "Autista", "Stato", "Importo"];
+    indicatori.forEach((i, index) => doc.text(`${i.label}: ${formattaImporto(i.value)}`, 14, 32 + index * 6));
+    doc.text("Valori riferiti alla data del servizio, non alla data dei movimenti.", 14, 71);
+    const tableColumn = ["Data", "Paziente", "Autista", "Stato prenotazione", "Costo originale", "Rimborso"];
     const tableRows = data.map((item) => [
       item.data_appuntamento || "—",
       `${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`,
       item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non assegnato",
-      !item.ora_inizio_effettiva ? "In Attesa" : !item.ora_fine_effettiva ? "In Corso" : "Completata",
-      `${item.costo || 0} €`,
+      item.annullata_il ? statoPrenotazione(item) : `${statoPrenotazione(item)}\n${!item.ora_inizio_effettiva ? "In attesa" : !item.ora_fine_effettiva ? "In corso" : "Completata"}`,
+      formattaImporto(item.costo),
+      item.annullata_il && item.pagato ? `${formattaImporto(item.costo)} ${item.rimborso_effettuato_il ? "effettuato" : "da effettuare"}` : "Non previsto",
     ]);
 
     // Chiamata standard diretta della funzione
     autoTable(doc, {
       head: [tableColumn],
       body: tableRows,
-      startY: 32,
+      startY: 78,
       styles: { fontSize: 8, cellPadding: 2.5 },
       headStyles: { fillColor: [15, 23, 42] },
     });
@@ -130,56 +148,78 @@ export default function ReportPage() {
 
   // 3. EXPORT TICKET PDF SINGOLO
   const exportSinglePDF = (item: any) => {
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+    const margine = 14;
+    const larghezza = doc.internal.pageSize.getWidth() - margine * 2;
+    const limitePagina = doc.internal.pageSize.getHeight() - margine;
+    let y = margine;
 
-    // Testata Istituzionale
-    doc.setFillColor(15, 23, 42);
-    doc.rect(0, 0, 210, 24, "F");
+    // Testi a capo e nuove pagine evitano sovrapposizioni con nomi e indirizzi lunghi.
+    const scriviTesto = (testo: string, dimensione = 10, grassetto = false) => {
+      doc.setFont("helvetica", grassetto ? "bold" : "normal");
+      doc.setFontSize(dimensione);
+      doc.setTextColor(15, 23, 42);
+      const righe: string[] = doc.splitTextToSize(testo, larghezza);
+      const altezzaRiga = dimensione * 0.3528 * 1.4;
+      for (const riga of righe) {
+        if (y + altezzaRiga > limitePagina) {
+          doc.addPage();
+          y = margine;
+        }
+        doc.text(riga, margine, y);
+        y += altezzaRiga;
+      }
+      y += 2;
+    };
 
-    doc.setFontSize(14);
-    doc.setTextColor(255, 255, 255);
-    doc.text("RICEVUTA DI TRASPORTO SANITARIO ORDINARIO", 14, 15);
+    scriviTesto(associazione.denominazione, 18, true);
+    scriviTesto(associazione.denominazioneCompleta, 9, true);
+    scriviTesto(associazione.distaccamento, 9, true);
+    scriviTesto(associazione.indirizzo, 9);
+    scriviTesto(`Tel. ${associazione.telefono} | Cell. ${associazione.cellulare} | ${associazione.email}`, 9);
+    scriviTesto(`C.F. ${associazione.codiceFiscale} | P. IVA ${associazione.partitaIva}`, 9);
+    scriviTesto(associazione.iscrizioni.join(" | "), 8);
+    y += 3;
 
-    doc.setTextColor(15, 23, 42);
-    doc.setFontSize(10);
-    doc.text(`Identificativo Servizio: #${(item.id || "").slice(0, 8).toUpperCase()}`, 14, 34);
-    doc.text(`Data Emissione: ${new Date().toLocaleDateString("it-IT")}`, 150, 34);
+    scriviTesto("RICEVUTA DI TRASPORTO SANITARIO ORDINARIO", 12, true);
+    scriviTesto(`Identificativo Servizio: #${(item.id || "").slice(0, 8).toUpperCase()}`, 9);
+    scriviTesto(`Data Emissione: ${new Date().toLocaleDateString("it-IT")}`, 9);
+    y += 3;
 
-    // Box Paziente
-    doc.setDrawColor(226, 232, 240);
-    doc.setFillColor(248, 250, 252);
-    doc.roundedRect(14, 40, 182, 30, 2, 2, "FD");
+    scriviTesto("DATI PAZIENTE E ASSEGNAZIONE", 10, true);
+    scriviTesto(`Assistito: ${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`);
+    scriviTesto(`Equipaggio / Autista: ${item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non indicato"}`);
+    y += 3;
 
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text("DATI PAZIENTE E ASSEGNAZIONE", 20, 48);
+    scriviTesto("DETTAGLI LOGISTICI", 10, true);
+    scriviTesto(`Data e Ora Convocazione: ${item.data_appuntamento || "Non indicata"} alle ore ${item.ora_appuntamento || "--:--"}`, 9);
+    scriviTesto(`Punto di Prelievo: ${item.partenza_via || ""} ${item.partenza_civico || ""}, ${item.partenza_citta || ""}`, 9);
+    scriviTesto(`Destinazione Finale: ${item.arrivo_via || ""} ${item.arrivo_civico || ""}, ${item.arrivo_citta || ""}`, 9);
+    y += 3;
 
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Assistito: ${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`, 20, 56);
-    doc.text(`Equipaggio / Autista: ${item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non indicato"}`, 20, 63);
-
-    // Dettagli Tratta
-    doc.text("DETTAGLI LOGISTICI", 14, 82);
-    doc.setFontSize(9);
-    doc.text(`Data e Ora Convocazione: ${item.data_appuntamento} alle ore ${item.ora_appuntamento || "--:--"}`, 14, 90);
-    doc.text(`Punto di Prelievo: ${item.partenza_via || ""} ${item.partenza_civico || ""}, ${item.partenza_citta || ""}`, 14, 97);
-    doc.text(`Destinazione Finale: ${item.arrivo_via || ""} ${item.arrivo_civico || ""}, ${item.arrivo_citta || ""}`, 14, 104);
-
-    // Riepilogo Economico
-    doc.roundedRect(14, 116, 182, 26, 2, 2, "FD");
-    doc.setFontSize(10);
-    doc.text(`Importo Totale Servizio:`, 20, 128);
-    doc.setFontSize(14);
-    doc.setTextColor(37, 99, 235);
-    doc.text(`${item.costo || 0} €`, 85, 128);
-
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Stato Pagamento: ${item.pagato ? "SALDATO" : "DA SALDARE"}`, 20, 136);
+    scriviTesto("RIEPILOGO ECONOMICO", 10, true);
+    scriviTesto(`Costo originale del servizio: ${formattaImporto(item.costo)}`, 12, true);
+    scriviTesto(`Stato prenotazione: ${statoPrenotazione(item)}`, 9);
+    scriviTesto(`Incasso originale: ${item.pagato ? "RICEVUTO" : "NON RICEVUTO"}`, 9);
+    if (item.annullata_il) {
+      scriviTesto(`Annullata il: ${new Date(item.annullata_il).toLocaleString("it-IT")}`, 9);
+      if (item.pagato) scriviTesto(`Rimborso integrale: ${formattaImporto(item.costo)} - ${item.rimborso_effettuato_il ? "effettuato" : "da effettuare"}`, 9);
+      if (item.rimborso_effettuato_il) scriviTesto(`Denaro restituito il: ${new Date(item.rimborso_effettuato_il).toLocaleString("it-IT")}`, 9);
+    }
+    if (item.metodo_pagamento) {
+      scriviTesto(`Metodo di pagamento: ${item.metodo_pagamento}`, 9);
+    }
+    if (item.ore_incluse !== null && item.ore_incluse !== undefined && item.ore_incluse !== "") {
+      scriviTesto(`Ore incluse: ${item.ore_incluse}`, 9);
+    }
+    if (item.costo_ora_supplementare !== null && item.costo_ora_supplementare !== undefined && item.costo_ora_supplementare !== "") {
+      scriviTesto(`Costo ora supplementare: ${item.costo_ora_supplementare} €`, 9);
+    }
 
     doc.save(`Ricevuta_${item.pazienti?.cognome || "Paziente"}_${item.data_appuntamento}.pdf`);
   };
+
+  if (erroreCaricamento && !loading) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => void fetchData()} />;
 
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
@@ -216,38 +256,17 @@ export default function ReportPage() {
           </div>
         </div>
 
-        {/* KPI RAPIDI */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Fatturato Periodo</p>
-              <p className="text-2xl font-black text-slate-900 mt-1">{totaleFatturato.toFixed(2)} €</p>
+        <p className="text-sm text-slate-600">Valori riferiti ai servizi del periodo selezionato, non alla data di incasso o rimborso. Gli incassi registrati comprendono gli anticipi delle corse annullate.</p>
+        {data.some((p) => !costoValido(p.costo)) && <p role="status" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Sono presenti importi mancanti o non validi, esclusi dai totali. Verificare i dati originali.</p>}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {indicatori.map((i) => (
+            <div key={i.label} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <p className="text-xs font-semibold text-slate-600">{i.label}</p>
+              <p className="mt-1 text-2xl font-bold text-slate-900">{formattaImporto(i.value)}</p>
             </div>
-            <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-100 text-blue-600 flex items-center justify-center">
-              <Euro size={20} />
-            </div>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Servizi Filtrati</p>
-              <p className="text-2xl font-black text-slate-900 mt-1">{data.length}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 flex items-center justify-center">
-              <FileSpreadsheet size={20} />
-            </div>
-          </div>
-
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Completate con successo</p>
-              <p className="text-2xl font-black text-emerald-600 mt-1">{corseCompletate}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center">
-              <CheckCircle2 size={20} />
-            </div>
-          </div>
+          ))}
         </div>
+        <p className="text-xs text-slate-600">Servizi selezionati: {data.length} | Annullati: {data.filter((c) => !!c.annullata_il).length} | Completati non annullati: {corseCompletate}</p>
 
         {/* FILTRI */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
@@ -275,7 +294,7 @@ export default function ReportPage() {
             </div>
             <div className="flex gap-2 sm:self-end">
               <button
-                onClick={fetchData}
+                onClick={() => void fetchData()}
                 className="flex-1 sm:flex-none px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition"
               >
                 Filtra Risultati
@@ -320,9 +339,10 @@ export default function ReportPage() {
                         {item.pazienti?.nome} {item.pazienti?.cognome}
                       </h2>
                     </div>
-                    <span className="font-black text-slate-900 text-base">{item.costo || 0} €</span>
+                    <span className="font-black text-slate-900 text-base">{formattaImporto(item.costo)}</span>
                   </div>
 
+                  <p className="text-xs font-semibold text-slate-700">{statoPrenotazione(item)}</p>
                   <div className="text-xs text-slate-600 flex justify-between items-center pt-2 border-t border-slate-100">
                     <span>Autista: {item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "N/D"}</span>
                     <button
@@ -337,7 +357,7 @@ export default function ReportPage() {
             </div>
 
             {/* TABELLA DESKTOP */}
-            <div className="hidden md:block bg-white shadow-sm rounded-xl overflow-hidden border border-slate-200">
+            <div className="hidden md:block bg-white shadow-sm rounded-xl overflow-x-auto border border-slate-200">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-100/75 text-slate-600 uppercase text-xs font-semibold tracking-wider border-b border-slate-200">
                   <tr>
@@ -351,18 +371,16 @@ export default function ReportPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {data.map((item) => {
-                    const stato = !item.ora_inizio_effettiva
+                    const stato = item.annullata_il ? "Annullata" : !item.ora_inizio_effettiva
                       ? "In Attesa"
                       : !item.ora_fine_effettiva
                       ? "In Corso"
                       : "Completata";
 
-                    const badgeStyle =
-                      stato === "Completata"
-                        ? "bg-slate-100 text-slate-700"
-                        : stato === "In Corso"
-                        ? "bg-amber-50 text-amber-800 border border-amber-200"
-                        : "bg-blue-50 text-blue-700";
+                    const badgeStyle = rimborsoPendente(item)
+                      ? "bg-amber-50 text-amber-800 border border-amber-200"
+                      : item.annullata_il ? "bg-slate-100 text-slate-700"
+                      : item.pagato ? "bg-emerald-50 text-emerald-800" : "bg-amber-50 text-amber-800";
 
                     return (
                       <tr key={item.id} className="hover:bg-slate-50/80 transition">
@@ -379,11 +397,12 @@ export default function ReportPage() {
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeStyle}`}>
-                            {stato}
+                            {statoPrenotazione(item)}
                           </span>
+                          {!item.annullata_il && <span className="mt-1 block text-xs text-slate-500">{stato}</span>}
                         </td>
                         <td className="py-3 px-4 text-right font-bold text-slate-900">
-                          {item.costo || 0} €
+                          {formattaImporto(item.costo)}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <button

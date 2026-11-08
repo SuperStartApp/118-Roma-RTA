@@ -2,6 +2,8 @@
 
 import React, { useEffect, useState, Suspense } from "react";
 import { supabase } from "@/app/lib/supabase";
+import ErroreCaricamento from "@/components/ErroreCaricamento";
+import { statoPrenotazione, formattaImporto } from "@/app/lib/stato-prenotazione";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
@@ -29,10 +31,14 @@ function CorsaDetailContent() {
   const router = useRouter();
   const [corsa, setCorsa] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
+  const [tentativo, setTentativo] = useState(0);
 
   useEffect(() => {
     async function fetchDettagli() {
       if (!params || !params.id) return;
+      setLoading(true);
+      setErroreCaricamento(null);
       try {
         const { data, error } = await supabase
           .from("prenotazioni")
@@ -44,12 +50,13 @@ function CorsaDetailContent() {
         setCorsa(data);
       } catch (error: any) {
         console.error("Errore caricamento dettagli:", error.message);
+        setErroreCaricamento("Impossibile leggere la scheda della corsa. Verifica il collegamento e riprova.");
       } finally {
         setLoading(false);
       }
     }
     fetchDettagli();
-  }, [params]);
+  }, [params, tentativo]);
 
   const calcolaDurata = () => {
     if (!corsa?.ora_inizio_effettiva || !corsa?.ora_fine_effettiva) return null;
@@ -104,6 +111,8 @@ function CorsaDetailContent() {
     );
   }
 
+  if (erroreCaricamento) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => setTentativo((n) => n + 1)} />;
+
   if (!corsa) {
     return (
       <div className="bg-white rounded-2xl border border-red-200 p-8 text-center space-y-3">
@@ -152,10 +161,17 @@ function CorsaDetailContent() {
               }`}
             >
               <CreditCard size={13} />
-              {corsa.pagato ? "Pagamento Registrato" : "Da Saldo / Insoluto"}
+              {statoPrenotazione(corsa)}
             </span>
           </div>
         </div>
+
+        {corsa.annullata_il && (
+          <div className="mt-3 rounded-lg border border-slate-600 bg-slate-800 p-3 text-xs text-slate-100">
+            <p>Annullata il {new Date(corsa.annullata_il).toLocaleString("it-IT")}. Costo originale: {formattaImporto(corsa.costo)}.</p>
+            {corsa.pagato && <p>Rimborso integrale {corsa.rimborso_effettuato_il ? `effettuato il ${new Date(corsa.rimborso_effettuato_il).toLocaleString("it-IT")}` : "da effettuare"}: {formattaImporto(corsa.costo)}. Incasso originale conservato.</p>}
+          </div>
+        )}
 
         {/* METADATI MISSIONE */}
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4 text-xs">
@@ -327,7 +343,7 @@ function CorsaDetailContent() {
             </div>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Importo</span>
-              <p className="text-base font-extrabold text-blue-900 mt-0.5">{corsa.costo ? `${corsa.costo} €` : "—"}</p>
+              <p className="text-base font-extrabold text-blue-900 mt-0.5">{formattaImporto(corsa.costo)}</p>
             </div>
           </div>
 

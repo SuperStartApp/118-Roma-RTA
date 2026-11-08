@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
+import { associazione } from "@/app/lib/associazione";
 import { useRouter } from "next/navigation";
 import { 
   Play, 
@@ -27,6 +28,7 @@ export default function AutistaDashboard() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [nomeAutista, setNomeAutista] = useState("");
   const [tesseraAutista, setTesseraAutista] = useState<string | null>(null);
+  const [erroreTesseraAutista, setErroreTesseraAutista] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // DATA ODIERNA DEFERITA (risolve l'avviso di Next.js)
@@ -60,18 +62,20 @@ export default function AutistaDashboard() {
   }, [router]);
 
   async function fetchDatiAutista(id: string) {
+    setErroreTesseraAutista(null);
     try {
-      const { data } = await supabase
+      const { data, error: metadataError } = await supabase
         .from("autisti")
         .select("numero_tessera, anno_tessera")
         .eq("id", id)
         .single();
 
+      if (metadataError) throw metadataError;
       if (data?.numero_tessera) {
         setTesseraAutista(`${data.numero_tessera}/${data.anno_tessera || ""}`);
       }
     } catch {
-      // Non bloccante
+      setErroreTesseraAutista("Dati della tessera autista non disponibili.");
     }
   }
 
@@ -82,6 +86,7 @@ export default function AutistaDashboard() {
         .from("prenotazioni")
         .select(`*, pazienti(*)`)
         .eq("autista_id", id)
+        .is("annullata_il", null)
         .order("data_appuntamento", { ascending: true })
         .order("ora_appuntamento", { ascending: true });
 
@@ -102,14 +107,19 @@ export default function AutistaDashboard() {
     const colonna = tipo === "inizio" ? "ora_inizio_effettiva" : "ora_fine_effettiva";
 
     try {
-      const { error: dbError } = await supabase
+      const autistaId = localStorage.getItem("autista_id");
+      if (!autistaId) throw new Error("Accesso autista non disponibile. Rientra con il PIN.");
+      const { data, error: dbError } = await supabase
         .from("prenotazioni")
         .update({ [colonna]: oraAttuale })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("autista_id", autistaId)
+        .is("annullata_il", null)
+        .select("id").maybeSingle();
 
       if (dbError) throw dbError;
+      if (!data) throw new Error("La corsa non è più eseguibile o assegnata a te. Aggiorna l’elenco.");
 
-      const autistaId = localStorage.getItem("autista_id")!;
       await fetchMieCorse(autistaId);
     } catch (err: any) {
       alert("Errore registrazione: " + (err?.message || "Riprova tra poco"));
@@ -163,27 +173,33 @@ export default function AutistaDashboard() {
 
         if (rpcErr) throw rpcErr;
 
-        numTessera = prossimoNum;
-        await supabase
+        const { data: emessa, error: emissioneError } = await supabase
           .from("pazienti")
           .update({
             numero_tessera: prossimoNum,
             anno_tessera: annoTessera,
             data_tesseramento: new Date().toISOString().split("T")[0]
           })
-          .eq("id", corsa.pazienti.id);
+          .eq("id", corsa.pazienti.id)
+          .is("numero_tessera", null)
+          .select("id, numero_tessera, anno_tessera, data_tesseramento")
+          .maybeSingle();
 
-        // Aggiorniamo localmente
-        corsa.pazienti.numero_tessera = prossimoNum;
-        corsa.pazienti.anno_tessera = annoTessera;
+        if (emissioneError) throw emissioneError;
+        if (!emessa || emessa.numero_tessera !== prossimoNum) throw new Error("Emissione non confermata. Aggiorna l’elenco prima di riprovare.");
+        numTessera = emessa.numero_tessera;
+        setCorse((prev) => prev.map((item) => item.pazienti?.id === emessa.id
+          ? { ...item, pazienti: { ...item.pazienti, ...emessa } } : item));
       } catch (e: any) {
         console.error("Errore generazione tessera:", e);
+        alert("Tessera non emessa: verifica connessione e permessi, poi aggiorna l’elenco. Nessun messaggio WhatsApp è stato preparato.");
+        return;
       }
     }
 
     const cleanPhone = corsa.pazienti.telefono.replace(/\D/g, "");
     const numero = cleanPhone.startsWith("39") ? cleanPhone : `39${cleanPhone}`;
-    const linkTessera = `${window.location.origin}/tessera/${corsa.pazienti.id}`;
+    const linkTessera = new URL(`/tessera/${encodeURIComponent(corsa.pazienti.id)}`, associazione.urlGestionale).href;
 
     const msg = 
       `🚑 *TESSERA SOCIO SOSTENITORE*\n\n` +
@@ -290,6 +306,7 @@ export default function AutistaDashboard() {
 
       {/* CONTENUTO DASHBOARD */}
       <main className="max-w-2xl mx-auto p-4 space-y-4">
+        {erroreTesseraAutista && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{erroreTesseraAutista} <button type="button" className="font-semibold underline" onClick={() => { const id = localStorage.getItem("autista_id"); if (id) void fetchDatiAutista(id); }}>Riprova</button></div>}
         
         {/* SELEZIONE TABS (OGGI / FUTURE / STORICO) */}
         <div className="bg-white p-1 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-3 gap-1">

@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
+import ErroreCaricamento from "@/components/ErroreCaricamento";
+import { annullaPrenotazione, registraRimborso, cambiaPagamento } from "@/app/lib/operazioni-prenotazioni";
+import { statoPrenotazione, rimborsoPendente, formattaImporto, costoValido, type DatiEconomiciPrenotazione } from "@/app/lib/stato-prenotazione";
 import Link from "next/link";
 import { 
   Search, 
@@ -20,14 +23,13 @@ import {
   Building2,
   MapPin,
   Phone,
-  Trash2
+  Ban
 } from "lucide-react";
 
-interface Prenotazione {
+interface Prenotazione extends DatiEconomiciPrenotazione {
   id: string;
   data_appuntamento: string;
   ora_appuntamento: string;
-  costo: number;
   metodo_pagamento: string;
   pagato: boolean;
   autista_id: string | null;
@@ -43,8 +45,13 @@ export default function ListaPrenotazioni() {
   const [prenotazioni, setPrenotazioni] = useState<Prenotazione[]>([]);
   const [autisti, setAutisti] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
+  const [erroreAutisti, setErroreAutisti] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const operationLock = useRef(false);
+  const [esito, setEsito] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [filterStato, setFilterStato] = useState("tutte");
 
   // DATA ODIERNA SICURA
   const [todayStr, setTodayStr] = useState<string>("");
@@ -70,16 +77,23 @@ export default function ListaPrenotazioni() {
   }, []);
 
   async function fetchAutisti() {
-    const { data } = await supabase
-      .from("autisti")
-      .select("id, nome, cognome")
-      .eq("attivo", true)
-      .order("cognome", { ascending: true });
-    setAutisti(data || []);
+    setErroreAutisti(null);
+    try {
+      const { data, error } = await supabase
+        .from("autisti")
+        .select("id, nome, cognome")
+        .eq("attivo", true)
+        .order("cognome", { ascending: true });
+      if (error) throw error;
+      setAutisti(data || []);
+    } catch {
+      setErroreAutisti("Elenco autisti non disponibile: assegnazione temporaneamente sospesa.");
+    }
   }
 
   async function fetchPrenotazioni() {
     setLoading(true);
+    setErroreCaricamento(null);
     try {
       const { data, error } = await supabase
         .from("prenotazioni")
@@ -91,6 +105,7 @@ export default function ListaPrenotazioni() {
       setPrenotazioni(data || []);
     } catch (error: any) {
       console.error("Errore fetch prenotazioni:", error.message);
+      setErroreCaricamento("Impossibile caricare le prenotazioni. Verifica la connessione e riprova.");
     } finally {
       setLoading(false);
     }
@@ -98,15 +113,20 @@ export default function ListaPrenotazioni() {
 
   // ASSEGNAZIONE / CAMBIO AUTISTA AL VOLO
   async function handleCambioAutista(prenotazioneId: string, nuovoAutistaId: string) {
+    if (operationLock.current || erroreAutisti || prenotazioni.find((p) => p.id === prenotazioneId)?.annullata_il) return;
+    operationLock.current = true;
     setUpdatingId(prenotazioneId);
     try {
       const val = nuovoAutistaId === "" ? null : nuovoAutistaId;
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("prenotazioni")
         .update({ autista_id: val })
-        .eq("id", prenotazioneId);
+        .eq("id", prenotazioneId)
+        .is("annullata_il", null)
+        .select("id, autista_id").maybeSingle();
 
       if (error) throw error;
+      if (!data || data.autista_id !== val) throw new Error("Assegnazione non confermata. Aggiorna l’elenco.");
 
       setPrenotazioni((prev) =>
         prev.map((item) => {
@@ -120,62 +140,71 @@ export default function ListaPrenotazioni() {
     } catch (err: any) {
       alert("Errore durante l'assegnazione dell'autista: " + err.message);
     } finally {
+      operationLock.current = false;
       setUpdatingId(null);
     }
   }
 
-  // TOGGLE STATO PAGAMENTO
-  async function togglePagamento(id: string, statoAttuale: boolean) {
+  async function confermaOperazione(p: Prenotazione, azione: "annulla" | "rimborso" | "pagamento") {
+    if (operationLock.current) return;
+    operationLock.current = true;
     try {
-      const { error } = await supabase
-        .from("prenotazioni")
-        .update({ pagato: !statoAttuale })
-        .eq("id", id);
-
-      if (error) throw error;
-
-      setPrenotazioni((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, pagato: !statoAttuale } : item))
-      );
-    } catch (err: any) {
-      alert("Errore aggiornamento pagamento: " + err.message);
-    }
-  }
-
-  // ELIMINA PRENOTAZIONE CON CONFERMA
-  async function handleEliminaPrenotazione(id: string, nomePaziente?: string) {
-    const conferma = window.confirm(
-      `Sei sicuro di voler eliminare la corsa ${nomePaziente ? `di ${nomePaziente}` : ""}? L'operazione non può essere annullata.`
-    );
-    if (!conferma) return;
-
-    setDeletingId(id);
-    try {
-      const { error } = await supabase
-        .from("prenotazioni")
-        .delete()
-        .eq("id", id);
-
-      if (error) throw error;
-
-      // Rimuoviamo la corsa dalla lista all'istante
-      setPrenotazioni((prev) => prev.filter((p) => p.id !== id));
-    } catch (err: any) {
-      alert("Errore durante l'eliminazione: " + err.message);
+      const dettagli = `Paziente: ${p.pazienti ? `${p.pazienti.nome} ${p.pazienti.cognome}` : "Non disponibile"}\nData corsa: ${new Date(p.data_appuntamento + "T00:00:00").toLocaleDateString("it-IT")}\nCosto originale: ${formattaImporto(p.costo)}\n${statoPrenotazione(p)}`;
+      if (azione === "annulla") {
+        if (p.annullata_il) throw new Error("La prenotazione è già annullata.");
+        if (!window.confirm(`ANNULLA PRENOTAZIONE\n\n${dettagli}\n\n${p.pagato ? "Il rimborso integrale sarà obbligatorio e resterà da effettuare." : "Non è previsto alcun rimborso."}\n\nConfermi l’annullamento? Il record sarà conservato.`)) return;
+      }
+      if (azione === "rimborso") {
+        if (!rimborsoPendente(p) || !costoValido(p.costo)) throw new Error("Verifica lo stato e l’importo originale prima del rimborso.");
+        if (!window.confirm(`REGISTRA RIMBORSO INTEGRALE\n\n${dettagli}\n\nImporto da restituire: ${formattaImporto(p.costo)} (100%).\n\nConfermi che tutto il denaro è già stato effettivamente restituito? Questa azione registra il rimborso e non trasferisce denaro.`)) return;
+      }
+      setProcessingId(p.id);
+      setEsito(null);
+      const aggiornata = azione === "annulla" ? await annullaPrenotazione(supabase, p)
+        : azione === "rimborso" ? await registraRimborso(supabase, p)
+        : await cambiaPagamento(supabase, p);
+      setPrenotazioni((prev) => prev.map((item) => item.id === p.id ? { ...item, ...aggiornata } : item));
+      setEsito({ type: "success", text: azione === "pagamento" ? "Stato del pagamento aggiornato." : statoPrenotazione(aggiornata) });
+    } catch (error) {
+      setEsito({ type: "error", text: error instanceof Error ? error.message : "Operazione non riuscita. Aggiorna l’elenco." });
     } finally {
-      setDeletingId(null);
+      operationLock.current = false;
+      setProcessingId(null);
     }
   }
+
+  const azionePrenotazione = (p: Prenotazione) => {
+    if (p.annullata_il && !rimborsoPendente(p)) return null;
+    return (
+      <button type="button" disabled={!!processingId || !!updatingId || (rimborsoPendente(p) && !costoValido(p.costo))}
+        title={rimborsoPendente(p) && !costoValido(p.costo) ? "Importo originale non disponibile: rimborso non registrabile" : undefined}
+        onClick={() => confermaOperazione(p, p.annullata_il ? "rimborso" : "annulla")}
+        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:opacity-50 ${p.annullata_il ? "border-amber-300 bg-amber-50 text-amber-900" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
+        {processingId === p.id ? <Loader2 size={14} className="animate-spin" /> : <Ban size={14} />}
+        {p.annullata_il ? "Registra rimborso" : "Annulla prenotazione"}
+      </button>
+    );
+  };
+
+  const badgePagamento = (p: Prenotazione) => (
+    <button type="button" disabled={!!p.annullata_il || !!processingId || !!updatingId}
+      onClick={() => confermaOperazione(p, "pagamento")} aria-pressed={p.pagato}
+      title={p.annullata_il ? "Storico del pagamento non modificabile" : p.pagato ? "Segna come da incassare" : "Conferma pagamento ricevuto"}
+      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-left text-xs font-semibold disabled:cursor-default ${rimborsoPendente(p) ? "border-amber-300 bg-amber-50 text-amber-900" : p.annullata_il ? "border-slate-300 bg-slate-100 text-slate-700" : p.pagato ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+      <CreditCard size={12} className="shrink-0" />{statoPrenotazione(p)}
+    </button>
+  );
 
   const resetFilters = () => {
     setSearchTerm("");
     setFilterDate("");
     setFilterAutista("");
+    setFilterStato("tutte");
   };
 
   // CALCOLO CONTATORI
-  const corseOggi = todayStr ? prenotazioni.filter((p) => p.data_appuntamento === todayStr) : [];
-  const corseDaAssegnare = prenotazioni.filter((p) => !p.autista_id);
+  const corseOggi = todayStr ? prenotazioni.filter((p) => !p.annullata_il && p.data_appuntamento === todayStr) : [];
+  const corseDaAssegnare = prenotazioni.filter((p) => !p.annullata_il && !p.autista_id);
 
   // FILTRAGGIO IN BASE AL TAB SELEZIONATO
   let listaFiltrata = prenotazioni;
@@ -206,7 +235,13 @@ export default function ListaPrenotazioni() {
     listaFiltrata = listaFiltrata.filter((p) => p.autista_id === filterAutista);
   }
 
-  const hasActiveFilters = searchTerm || filterDate || filterAutista;
+  if (filterStato === "attive") listaFiltrata = listaFiltrata.filter((p) => !p.annullata_il);
+  if (filterStato === "annullate") listaFiltrata = listaFiltrata.filter((p) => !!p.annullata_il);
+  if (filterStato === "rimborsi") listaFiltrata = listaFiltrata.filter(rimborsoPendente);
+
+  const hasActiveFilters = searchTerm || filterDate || filterAutista || filterStato !== "tutte";
+
+  if (erroreCaricamento && !loading) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => void fetchPrenotazioni()} />;
 
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
@@ -222,7 +257,7 @@ export default function ListaPrenotazioni() {
               Quadro Operativo Servizi
             </h1>
             <p className="text-sm text-slate-500">
-              Gestione orari, assegnazione tempestiva equipaggi e cancellazione servizi.
+              Gestione corse, annullamenti e rimborsi integrali con storico conservato.
             </p>
           </div>
 
@@ -235,11 +270,16 @@ export default function ListaPrenotazioni() {
           </Link>
         </div>
 
+        {esito && <div role={esito.type === "error" ? "alert" : "status"} className={esito.type === "error" ? "rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" : "rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800"}>{esito.text}</div>}
+        <button type="button" onClick={fetchPrenotazioni} disabled={loading || !!processingId || !!updatingId} className="inline-flex items-center gap-1.5 text-sm font-semibold text-blue-700 disabled:opacity-50"><RotateCcw size={14} /> Aggiorna elenco</button>
+
+        {erroreAutisti && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{erroreAutisti} <button type="button" onClick={() => void fetchAutisti()} className="font-semibold underline">Riprova</button></div>}
+
         {/* 3 TASTI TAB UNIFICATI: OGGI, DA ASSEGNARE, TUTTE */}
         <div className="grid grid-cols-3 gap-2 bg-slate-200/70 p-1.5 rounded-2xl">
           {/* TAB 1: OGGI */}
           <button
-            onClick={() => setTabAttivo("oggi")}
+            onClick={() => { setTabAttivo("oggi"); setFilterStato("tutte"); }}
             className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 ${
               tabAttivo === "oggi"
                 ? "bg-white text-slate-900 shadow-sm border border-slate-200"
@@ -256,7 +296,7 @@ export default function ListaPrenotazioni() {
 
           {/* TAB 2: DA ASSEGNARE */}
           <button
-            onClick={() => setTabAttivo("da_assegnare")}
+            onClick={() => { setTabAttivo("da_assegnare"); setFilterStato("tutte"); }}
             className={`py-3 px-3 rounded-xl text-xs sm:text-sm font-bold transition flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 ${
               tabAttivo === "da_assegnare"
                 ? "bg-amber-500 text-white shadow-sm"
@@ -350,7 +390,8 @@ export default function ListaPrenotazioni() {
                 }`}
               >
                 <option value="">Tutti gli equipaggi</option>
-                {autisti.map((a) => (
+
+                        {autisti.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.nome} {a.cognome}
                   </option>
@@ -358,6 +399,16 @@ export default function ListaPrenotazioni() {
               </select>
             </div>
           </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-3">
+          <label htmlFor="filtro-stato-corsa" className="mb-1 block text-xs font-semibold text-slate-600">Stato prenotazione</label>
+          <select id="filtro-stato-corsa" value={filterStato} onChange={(e) => { setFilterStato(e.target.value); if (e.target.value === "annullate" || e.target.value === "rimborsi") setTabAttivo("tutte"); }} className="w-full rounded-lg border border-slate-200 bg-slate-50 p-2 text-sm sm:max-w-sm">
+            <option value="tutte">Tutti gli stati</option>
+            <option value="attive">Prenotazioni attive</option>
+            <option value="annullate">Prenotazioni annullate</option>
+            <option value="rimborsi">Rimborsi da effettuare</option>
+          </select>
         </div>
 
         {/* CONTENUTO CORSE */}
@@ -381,16 +432,15 @@ export default function ListaPrenotazioni() {
             {/* VISTA MOBILE: CARD TOUCH COMPLETE */}
             <div className="grid grid-cols-1 gap-3 md:hidden">
               {listaFiltrata.map((p) => {
-                const isDeleting = deletingId === p.id;
 
                 return (
                   <div
                     key={p.id}
                     className={`bg-white rounded-2xl p-4 border shadow-sm space-y-3 ${
-                      !p.autista_id ? "border-amber-300 ring-2 ring-amber-400/20" : "border-slate-200"
+                      !p.annullata_il && !p.autista_id ? "border-amber-300 ring-2 ring-amber-400/20" : "border-slate-200"
                     }`}
                   >
-                    <div className="flex items-start justify-between">
+                    <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
                       <div>
                         <div className="text-xs font-semibold text-slate-500 flex items-center gap-1">
                           <Clock size={13} />
@@ -406,16 +456,7 @@ export default function ListaPrenotazioni() {
                         )}
                       </div>
 
-                      <button
-                        onClick={() => togglePagamento(p.id, p.pagato)}
-                        className={`text-[11px] font-bold px-2.5 py-1 rounded-full border transition ${
-                          p.pagato
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-800 border-amber-300"
-                        }`}
-                      >
-                        {p.pagato ? "Pagato" : "Da Saldare"}
-                      </button>
+                      {badgePagamento(p)}
                     </div>
 
                     {/* Assegnazione Autista Rapida */}
@@ -423,11 +464,12 @@ export default function ListaPrenotazioni() {
                       <UserCheck size={16} className={p.autista_id ? "text-blue-600" : "text-amber-600"} />
                       <select
                         value={p.autista_id || ""}
-                        disabled={updatingId === p.id}
+                        disabled={!!p.annullata_il || !!processingId || !!updatingId || !!erroreAutisti}
                         onChange={(e) => handleCambioAutista(p.id, e.target.value)}
                         className="w-full text-xs font-bold text-slate-800 bg-transparent outline-none cursor-pointer"
                       >
                         <option value="">⚠️ NESSUN AUTISTA (Assegna ora)</option>
+                        {p.autista_id && !autisti.some((a) => a.id === p.autista_id) && <option value={p.autista_id}>{p.autisti ? `${p.autisti.nome} ${p.autisti.cognome}` : "Autista assegnato"}</option>}
                         {autisti.map((a) => (
                           <option key={a.id} value={a.id}>
                             {a.nome} {a.cognome}
@@ -436,11 +478,11 @@ export default function ListaPrenotazioni() {
                       </select>
                     </div>
 
-                    {/* Azioni Mobile: Importo, Dettagli ed Elimina */}
+                    {/* Importo, dettaglio e conservazione dello storico */}
                     <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
-                      <span className="font-bold text-slate-900">{p.costo ? `${p.costo} €` : "Tariffa n.d."}</span>
+                      <span className="font-bold text-slate-900">{formattaImporto(p.costo)}</span>
                       
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex flex-wrap items-center justify-end gap-1.5">
                         <Link
                           href={`/prenotazioni/${p.id}`}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold bg-slate-900 text-white hover:bg-slate-800 transition"
@@ -448,14 +490,7 @@ export default function ListaPrenotazioni() {
                           <Eye size={13} /> Scheda
                         </Link>
                         
-                        <button
-                          disabled={isDeleting}
-                          onClick={() => handleEliminaPrenotazione(p.id, `${p.pazienti?.nome || ""} ${p.pazienti?.cognome || ""}`.trim())}
-                          className="p-1.5 text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
-                          title="Elimina corsa"
-                        >
-                          {isDeleting ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                        </button>
+                        {azionePrenotazione(p)}
                       </div>
                     </div>
                   </div>
@@ -464,7 +499,7 @@ export default function ListaPrenotazioni() {
             </div>
 
             {/* VISTA DESKTOP: TABELLA CENTRALE OPERATIVA */}
-            <div className="hidden md:block bg-white shadow-sm rounded-2xl overflow-hidden border border-slate-200">
+            <div className="hidden md:block bg-white shadow-sm rounded-2xl overflow-x-auto border border-slate-200">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-slate-100/75 text-slate-600 text-xs font-bold uppercase tracking-wider border-b border-slate-200">
                   <tr>
@@ -479,7 +514,6 @@ export default function ListaPrenotazioni() {
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {listaFiltrata.map((p) => {
-                    const isDeleting = deletingId === p.id;
 
                     return (
                       <tr key={p.id} className="hover:bg-slate-50/80 transition">
@@ -517,7 +551,7 @@ export default function ListaPrenotazioni() {
                           <div className="inline-flex items-center gap-1.5">
                             <select
                               value={p.autista_id || ""}
-                              disabled={updatingId === p.id}
+                              disabled={!!p.annullata_il || !!processingId || !!updatingId || !!erroreAutisti}
                               onChange={(e) => handleCambioAutista(p.id, e.target.value)}
                               className={`text-xs font-semibold px-2.5 py-1.5 rounded-xl border outline-none cursor-pointer transition ${
                                 p.autista_id 
@@ -526,7 +560,8 @@ export default function ListaPrenotazioni() {
                               }`}
                             >
                               <option value="">⚠️ Non Assegnato</option>
-                              {autisti.map((a) => (
+                              {p.autista_id && !autisti.some((a) => a.id === p.autista_id) && <option value={p.autista_id}>{p.autisti ? `${p.autisti.nome} ${p.autisti.cognome}` : "Autista assegnato"}</option>}
+                        {autisti.map((a) => (
                                 <option key={a.id} value={a.id}>
                                   {a.nome} {a.cognome}
                                 </option>
@@ -537,25 +572,15 @@ export default function ListaPrenotazioni() {
                         </td>
 
                         <td className="py-3 px-4 font-bold text-slate-900 text-xs">
-                          {p.costo ? `${p.costo} €` : "—"}
+                          {formattaImporto(p.costo)}
                         </td>
 
                         <td className="py-3 px-4 text-center">
-                          <button
-                            onClick={() => togglePagamento(p.id, p.pagato)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition ${
-                              p.pagato
-                                ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                                : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-300"
-                            }`}
-                          >
-                            <CreditCard size={12} />
-                            <span>{p.pagato ? "Pagato" : "Incassa"}</span>
-                          </button>
+                          {badgePagamento(p)}
                         </td>
 
                         <td className="py-3 px-4 text-right">
-                          <div className="inline-flex items-center gap-1.5 justify-end">
+                          <div className="inline-flex flex-wrap items-center gap-1.5 justify-end">
                             <Link
                               href={`/prenotazioni/${p.id}`}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-slate-900 text-white hover:bg-slate-800 transition"
@@ -565,15 +590,8 @@ export default function ListaPrenotazioni() {
                               <span>Dettagli</span>
                             </Link>
 
-                            {/* TASTO ELIMINA */}
-                            <button
-                              disabled={isDeleting}
-                              onClick={() => handleEliminaPrenotazione(p.id, `${p.pazienti?.nome || ""} ${p.pazienti?.cognome || ""}`.trim())}
-                              className="p-1.5 text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition"
-                              title="Elimina corsa definitivamente"
-                            >
-                              {isDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                            </button>
+                            {/* ANNULLAMENTO / RIMBORSO */}
+                            {azionePrenotazione(p)}
                           </div>
                         </td>
                       </tr>

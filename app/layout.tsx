@@ -5,13 +5,15 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import AccessoCentrale, { PulsanteLogout } from "@/components/AccessoCentrale";
 import { 
   Home, 
   PlusCircle, 
   ClipboardList, 
   CalendarDays, 
   Ambulance, 
-  Users // <--- Aggiunto qui!
+  Users,
+  BookOpen
 } from "lucide-react";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -25,21 +27,23 @@ function Navbar() {
   }
 
   const navItems = [
-    { href: "/", label: "Home", icon: Home },
-    { href: "/agenda", label: "Agenda", icon: CalendarDays },
-    { href: "/pazienti", label: "Pazienti", icon: Users },
-    { href: "/prenotazioni", label: "Corse", icon: ClipboardList },
-    { href: "/prenotazione", label: "Nuova", icon: PlusCircle, highlight: true },
+    { href: "/", label: "Centrale operativa", mobileLabel: "Centrale", icon: Home },
+    { href: "/agenda", label: "Agenda", mobileLabel: "Agenda", icon: CalendarDays },
+    { href: "/prenotazioni", label: "Gestione corse", mobileLabel: "Corse", icon: ClipboardList },
+    { href: "/pazienti", label: "Pazienti e tessere", mobileLabel: "Pazienti", icon: Users },
+    { href: "/prenotazione", label: "Nuovo trasporto", mobileLabel: "Nuovo", icon: PlusCircle, highlight: true },
+    { href: "/guida", label: "Guida", mobileLabel: "Guida", icon: BookOpen },
   ];
+  const isActiveRoute = (href: string) => pathname === href || (href !== "/" && pathname?.startsWith(`${href}/`));
 
   return (
     <>
       {/* HEADER SUPERIORE */}
       <header className="sticky top-0 z-40 w-full bg-slate-900 text-slate-100 border-b border-slate-800 shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 h-14 md:h-16 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 h-14 lg:h-16 flex items-center justify-between gap-4">
           
           {/* Logo e Nome */}
-          <Link href="/" className="flex items-center space-x-2.5 focus:outline-none">
+          <Link href="/" aria-label="Torna alla centrale operativa" title="Torna alla centrale operativa" className="flex shrink-0 items-center space-x-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300">
             <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm">
               <Ambulance size={18} strokeWidth={2.2} />
             </div>
@@ -48,23 +52,24 @@ function Navbar() {
                 ROMA<span className="text-blue-400">R.T.A.</span>
               </span>
               <span className="text-[10px] text-slate-400 uppercase tracking-widest hidden sm:block">
-                Gestione Servizi
+                Centrale operativa
               </span>
             </div>
           </Link>
 
           {/* MENU DESKTOP */}
-          <nav className="hidden md:flex items-center space-x-1">
+          <nav aria-label="Navigazione principale" className="hidden xl:flex items-center gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const isActive = pathname === item.href;
+              const isActive = isActiveRoute(item.href);
               
               if (item.highlight) {
                 return (
                   <Link
                     key={item.href}
                     href={item.href}
-                    className="ml-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-sm font-medium bg-blue-600 text-white hover:bg-blue-500 transition shadow-sm"
+                    aria-current={isActive ? "page" : undefined}
+                    className="rta-primary-action ml-2 inline-flex min-h-11 items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-bold shadow-sm"
                   >
                     <Icon size={16} />
                     <span>{item.label}</span>
@@ -76,7 +81,8 @@ function Navbar() {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition ${
+                  aria-current={isActive ? "page" : undefined}
+                  className={`inline-flex min-h-11 items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 ${
                     isActive
                       ? "text-white bg-slate-800"
                       : "text-slate-300 hover:text-white hover:bg-slate-800/60"
@@ -89,32 +95,36 @@ function Navbar() {
             })}
           </nav>
 
-          {/* Badge Operativo su Mobile */}
-          <div className="md:hidden flex items-center gap-1 text-[11px] font-medium bg-slate-800 text-slate-300 px-2.5 py-1 rounded-full border border-slate-700">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            Centrale
-          </div>
+          <PulsanteLogout />
+          {/* Ritorno alla centrale dalle pagine interne su mobile */}
+          {pathname !== "/" && (
+            <Link href="/" className="xl:hidden inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-xs font-semibold text-slate-200 hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300">
+              <Home size={15} aria-hidden="true" /> Centrale
+            </Link>
+          )}
         </div>
       </header>
 
       {/* BOTTOM BAR MOBILE */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-800 py-1.5 px-2 flex justify-around items-center backdrop-blur-md bg-opacity-95 shadow-lg">
+      <nav aria-label="Navigazione mobile" className="xl:hidden fixed bottom-0 left-0 right-0 z-50 bg-slate-900 border-t border-slate-800 py-2 px-1 flex justify-around items-center shadow-lg">
         {navItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = isActiveRoute(item.href);
 
           if (item.highlight) {
             return (
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex flex-col items-center justify-center -mt-5"
+                aria-label={item.label}
+                aria-current={isActive ? "page" : undefined}
+                className="flex min-h-12 min-w-0 flex-1 flex-col items-center justify-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300"
               >
-                <div className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-lg shadow-blue-600/40 active:scale-95 transition">
+                <div className="rta-primary-action w-10 h-10 rounded-xl flex items-center justify-center">
                   <Icon size={22} strokeWidth={2.3} />
                 </div>
                 <span className="text-[10px] font-semibold text-blue-400 mt-1">
-                  Nuova
+                  {item.mobileLabel}
                 </span>
               </Link>
             );
@@ -124,12 +134,14 @@ function Navbar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex flex-col items-center py-1 px-3 rounded-lg transition ${
-                isActive ? "text-blue-400 font-semibold" : "text-slate-400 hover:text-slate-200"
+              aria-label={item.label}
+              aria-current={isActive ? "page" : undefined}
+              className={`flex min-h-12 min-w-0 flex-1 flex-col items-center py-1 px-1 rounded-lg transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-300 ${
+                isActive ? "text-blue-300 bg-slate-800 font-semibold" : "text-slate-300 hover:text-white"
               }`}
             >
               <Icon size={20} strokeWidth={isActive ? 2.3 : 1.8} />
-              <span className="text-[10px] mt-0.5">{item.label}</span>
+              <span className="text-[11px] mt-0.5">{item.mobileLabel}</span>
             </Link>
           );
         })}
@@ -146,13 +158,15 @@ export default function RootLayout({
   return (
     <html lang="it">
       <body className={`${inter.className} min-h-screen bg-slate-50 text-slate-900 flex flex-col`}>
-        <Suspense fallback={<div className="h-14 bg-slate-900" />}>
+        <Suspense fallback={<div className="p-6 text-center text-sm text-slate-600">Verifica accesso alla centrale…</div>}>
+          <AccessoCentrale>
           <Navbar />
-        </Suspense>
         
-        <main className="flex-1 w-full pb-24 md:pb-8">
+        <main className="flex-1 w-full pb-24 xl:pb-8">
           {children}
         </main>
+          </AccessoCentrale>
+        </Suspense>
       </body>
     </html>
   );

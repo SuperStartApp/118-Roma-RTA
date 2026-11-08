@@ -2,6 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
+import ErroreCaricamento from "@/components/ErroreCaricamento";
+import { associazione } from "@/app/lib/associazione";
+import { caricaPazienti, corrispondeRicercaPaziente } from "@/app/lib/pazienti";
 import Link from "next/link";
 import { 
   Users, 
@@ -35,12 +38,14 @@ interface PazienteConStorico {
   numero_tessera?: number | null;
   anno_tessera?: number | null;
   totaleCorse: number;
+  corseAnnullate: number;
   ultimaCorsa: string | null;
 }
 
 export default function PazientiPage() {
   const [pazienti, setPazienti] = useState<PazienteConStorico[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
   // ANNO CORRENTE IMPOSTATO VIA EFFECT PER EVITARE ERRORI NEXT.JS
@@ -76,42 +81,43 @@ export default function PazientiPage() {
 
   async function fetchPazientiEStorico() {
     setLoading(true);
+    setErroreCaricamento(null);
     try {
       // 1. Carica pazienti
-      const { data: pazList, error: pErr } = await supabase
-        .from("pazienti")
-        .select("*")
-        .order("cognome", { ascending: true });
+      const { data: pazList, error: pErr } = await caricaPazienti();
 
       if (pErr) throw pErr;
 
       // 2. Carica prenotazioni per contatore corse
       const { data: corseList, error: cErr } = await supabase
         .from("prenotazioni")
-        .select("paziente_id, data_appuntamento")
+        .select("paziente_id, data_appuntamento, annullata_il")
         .order("data_appuntamento", { ascending: false });
 
       if (cErr) throw cErr;
 
-      const corseMap: Record<string, { count: number; lastDate: string | null }> = {};
+      const corseMap: Record<string, { count: number; cancelled: number; lastDate: string | null }> = {};
       (corseList || []).forEach((c) => {
         if (!c.paziente_id) return;
         if (!corseMap[c.paziente_id]) {
-          corseMap[c.paziente_id] = { count: 1, lastDate: c.data_appuntamento };
+          corseMap[c.paziente_id] = { count: 1, cancelled: c.annullata_il ? 1 : 0, lastDate: c.data_appuntamento };
         } else {
           corseMap[c.paziente_id].count += 1;
+          if (c.annullata_il) corseMap[c.paziente_id].cancelled += 1;
         }
       });
 
       const arricchiti: PazienteConStorico[] = (pazList || []).map((p) => ({
         ...p,
         totaleCorse: corseMap[p.id]?.count || 0,
+        corseAnnullate: corseMap[p.id]?.cancelled || 0,
         ultimaCorsa: corseMap[p.id]?.lastDate || null,
       }));
 
       setPazienti(arricchiti);
     } catch (err: any) {
       console.error("Errore caricamento pazienti:", err);
+      setErroreCaricamento("Impossibile caricare pazienti e storico. Verifica la connessione e riprova.");
     } finally {
       setLoading(false);
     }
@@ -214,27 +220,36 @@ export default function PazientiPage() {
 
   // WHATSAPP
   const apriWhatsApp = (p: PazienteConStorico) => {
-    if (!p.telefono) return;
+    if (!p.telefono?.trim()) {
+      alert("Numero telefonico mancante: aggiungilo nella scheda paziente prima di inviare la tessera.");
+      return;
+    }
+    if (!p.numero_tessera) {
+      alert("Questo paziente non ha ancora un numero tessera. Gestisci il rilascio dalla scheda paziente prima dell’invio.");
+      return;
+    }
     let num = p.telefono.replace(/\D/g, "");
+    if (!num) {
+      alert("Il recapito non contiene un numero telefonico utilizzabile. Verifica la scheda paziente.");
+      return;
+    }
     if (num.length === 10 && !num.startsWith("39")) {
       num = "39" + num;
     }
-    const messaggio = 
-      `🚑 *CENTRALE TRASPORTI SANITARI*\n` +
+    const linkTessera = new URL(`/tessera/${encodeURIComponent(p.id)}`, associazione.urlGestionale).href;
+    const messaggio =
+      `*${associazione.denominazione} — Tessera associativa*\n\n` +
       `Gentile *${p.nome} ${p.cognome}*,\n` +
-      `La contattiamo dalla centrale operativa per i servizi di trasporto sanitario.\n` +
-      `Restiamo a Sua completa disposizione per conferme o nuovi servizi.`;
+      `può consultare, stampare o salvare in PDF la Sua tessera associativa al seguente collegamento:\n` +
+      `${linkTessera}\n\n` +
+      `Un cordiale saluto da ${associazione.denominazione}.`;
 
     window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`, "_blank");
   };
 
-  const filteredPazienti = pazienti.filter((p) => {
-    const query = search.toLowerCase();
-    const nomeCompleto = `${p.nome} ${p.cognome}`.toLowerCase();
-    const cf = (p.codice_fiscale || "").toLowerCase();
-    const tel = (p.telefono || "").toLowerCase();
-    return nomeCompleto.includes(query) || cf.includes(query) || tel.includes(query);
-  });
+  const filteredPazienti = pazienti.filter((p) => corrispondeRicercaPaziente(p, search));
+
+  if (erroreCaricamento && !loading) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => void fetchPazientiEStorico()} />;
 
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
@@ -349,6 +364,7 @@ export default function PazientiPage() {
                     </div>
 
                     {/* Dati Clinici & Recapiti */}
+                    <p className="mt-3 text-xs text-slate-600">Prenotazioni: {p.totaleCorse} · Non annullate: {p.totaleCorse - p.corseAnnullate} · Annullate: {p.corseAnnullate}</p>
                     <div className="pt-3 space-y-2 text-xs text-slate-600">
                       {p.telefono && (
                         <div className="flex items-center gap-1.5 font-medium text-slate-700">
@@ -375,16 +391,17 @@ export default function PazientiPage() {
 
                   {/* Barra Azioni */}
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-1.5">
-                      {p.telefono && (
+                    <div className="flex flex-wrap items-center gap-1.5">
                         <button
+                          type="button"
                           onClick={() => apriWhatsApp(p)}
-                          className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg text-xs font-bold transition border border-emerald-200"
-                          title="WhatsApp"
+                          disabled={!p.telefono?.trim() || !haTessera}
+                          className="inline-flex min-h-11 items-center gap-1.5 p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition border border-emerald-200 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
+                          title={!p.telefono?.trim() ? "Aggiungi un numero telefonico nella scheda paziente" : !haTessera ? "Numero tessera non ancora assegnato" : "Invia il collegamento alla tessera su WhatsApp"}
                         >
                           <MessageSquare size={14} />
+                          <span>{!p.telefono?.trim() ? "Telefono mancante" : !haTessera ? "Tessera da assegnare" : "Invia tessera WhatsApp"}</span>
                         </button>
-                      )}
 
                       {haTessera && (
                         <Link

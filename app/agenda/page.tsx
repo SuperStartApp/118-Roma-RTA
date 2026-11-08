@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { supabase } from "@/app/lib/supabase";
+import ErroreCaricamento from "@/components/ErroreCaricamento";
 import Link from "next/link";
 import { 
   Calendar, 
@@ -24,8 +25,10 @@ interface CorsaOggi {
 }
 
 export default function AgendaGiornaliera() {
+  const dataOggiIso = useRef("");
   const [corse, setCorse] = useState<CorsaOggi[]>([]);
   const [loading, setLoading] = useState(true);
+  const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
   const [dataOggiTesto, setDataOggiTesto] = useState<string>("");
 
   useEffect(() => {
@@ -46,22 +49,26 @@ export default function AgendaGiornaliera() {
     const day = String(oggi.getDate()).padStart(2, "0");
     const dataIso = `${year}-${month}-${day}`;
 
+    dataOggiIso.current = dataIso;
     fetchCorseOggi(dataIso);
   }, []);
 
   async function fetchCorseOggi(dataOggiIso: string) {
     setLoading(true);
+    setErroreCaricamento(null);
     try {
       const { data, error } = await supabase
         .from("prenotazioni")
         .select(`*, pazienti(nome, cognome)`)
         .eq("data_appuntamento", dataOggiIso)
+        .is("annullata_il", null)
         .order("ora_appuntamento", { ascending: true });
 
       if (error) throw error;
       setCorse(data || []);
     } catch (error: any) {
       console.error("Errore agenda:", error);
+      setErroreCaricamento("Impossibile caricare l’agenda. Verifica la connessione e riprova.");
     } finally {
       setLoading(false);
     }
@@ -75,6 +82,8 @@ export default function AgendaGiornaliera() {
       </div>
     );
   }
+
+  if (erroreCaricamento && !loading) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => void fetchCorseOggi(dataOggiIso.current)} />;
 
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">

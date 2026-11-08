@@ -12,9 +12,8 @@ import {
   ClipboardList,
   Lock,
   KeyRound,
-  LogOut,
   AlertCircle,
-  Sparkles
+  CalendarDays
 } from "lucide-react";
 
 const MASTER_PIN = "1972";
@@ -134,167 +133,134 @@ export default function HomePage() {
     );
   }
 
-  // SCHEDE DASHBOARD
-  const cards = [
+  const sections = [
     {
-      href: "/prenotazioni",
-      title: "Quadro Operativo Corse",
-      description: "Turno odierno, chiamate da assegnare e archivio storico con riassegnazione rapida.",
-      icon: ClipboardList,
-      badge: "Centrale Servizi",
-      highlighted: true, // QUESTA CARD È IL CUORE PULSANTE
+      id: "operativita",
+      title: "Sezioni operative",
+      description: "Organizza i trasporti e ritrova subito le schede dei pazienti.",
+      operativa: true,
+      cards: [
+        {
+          href: "/prenotazioni",
+          title: "Gestione corse",
+          description: "Corse di oggi, servizi da assegnare e archivio. Gestisci autisti e stato dei pagamenti.",
+          icon: ClipboardList,
+          action: "Apri gestione corse",
+        },
+        {
+          href: "/pazienti",
+          title: "Pazienti e tessere",
+          description: "Cerca un paziente, consulta lo storico e accedi alla sua tessera associativa.",
+          icon: Users,
+          action: "Apri pazienti e tessere",
+        },
+      ],
     },
     {
-      href: "/prenotazione",
-      title: "Nuova Prenotazione",
-      description: "Inserisci i dati della chiamata, calcola tariffe e orari di trasporto.",
-      icon: PlusCircle,
-      badge: "Accettazione",
-      iconColor: "text-blue-600 bg-blue-50 border-blue-100",
-    },
-    {
-      href: "/pazienti",
-      title: "Rubrica Pazienti & Soci",
-      description: "Anagrafica assistiti, condizioni cliniche, storico e rilascio tessere socio.",
-      icon: Users,
-      badge: "Anagrafica & Tessere",
-      iconColor: "text-indigo-600 bg-indigo-50 border-indigo-100",
-    },
-    {
-      href: "/autisti",
-      title: "Gestione Personale",
-      description: "Anagrafica autisti e soccorritori, recapiti telefonici e PIN operativi di bordo.",
-      icon: ShieldCheck,
-      badge: "Staff & Risorse",
-      iconColor: "text-amber-600 bg-amber-50 border-amber-100",
-    },
-    {
-      href: "/report",
-      title: "Reportistica & Export",
-      description: "Esporta i dati contabili in Excel o genera le ricevute di trasporto in formato PDF.",
-      icon: FileSpreadsheet,
-      badge: "Amministrazione",
-      iconColor: "text-slate-700 bg-slate-100 border-slate-200",
-    },
-    {
-      href: "/autista",
-      title: "Area Terminale Autista",
-      description: "Accesso rapido con codice PIN per il personale in servizio sull'ambulanza.",
-      icon: Ambulance,
-      badge: "Personale Viaggiante",
-      iconColor: "text-rose-600 bg-rose-50 border-rose-100",
+      id: "gestione",
+      title: "Sezioni gestionali",
+      description: "Anagrafiche del personale, documenti e rendicontazione.",
+      operativa: false,
+      cards: [
+        {
+          href: "/autisti",
+          title: "Autisti",
+          description: "Gestisci anagrafica, recapiti e PIN degli autisti.",
+          icon: Ambulance,
+          action: "Gestisci autisti",
+        },
+        {
+          href: "/report",
+          title: "Amministrazione e report",
+          description: "Consulta i rendiconti, esporta Excel e scarica report e ricevute PDF.",
+          icon: FileSpreadsheet,
+          action: "Apri amministrazione e report",
+        },
+      ],
     },
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50 py-8 px-4 md:px-8">
-      <div className="max-w-6xl mx-auto space-y-8">
-        
-        {/* BANNER DI BENVENUTO / STATUS CENTRALE */}
-        <div className="bg-slate-900 text-white rounded-3xl p-6 md:p-8 shadow-sm border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              Centrale Operativa Attiva
+    <div className="min-h-screen bg-slate-50 px-4 py-6 md:px-8 md:py-8">
+      <div className="mx-auto max-w-6xl space-y-7">
+        <section aria-labelledby="centrale-titolo" className="rounded-3xl border border-slate-800 bg-slate-900 p-5 text-white shadow-sm md:p-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="max-w-xl space-y-3">
+              <div className="inline-flex items-center gap-2 rounded-full border border-emerald-700 bg-emerald-950 px-3 py-1 text-xs font-semibold text-emerald-200">
+                <ShieldCheck size={14} aria-hidden="true" /> Postazione sbloccata
+              </div>
+              <h1 id="centrale-titolo" className="text-2xl font-extrabold tracking-tight md:text-3xl">
+                Centrale operativa <span className="text-blue-300">ROMA R.T.A.</span>
+              </h1>
+              <p className="text-sm leading-relaxed text-slate-300">
+                Crea un trasporto, assegna un autista e gestisci le corse dalla centrale.
+              </p>
             </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight">
-              Pannello di Controllo <span className="text-blue-400">AmbulancePro</span>
-            </h1>
-            <p className="text-sm text-slate-400 leading-relaxed">
-              Gestione unificata dei trasporti sanitari, assegnazione equipaggi e anagrafica tessere soci sostenitori.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3 self-start md:self-auto">
-            <Link
-              href="/prenotazione"
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition shadow-sm"
-            >
-              <PlusCircle size={16} />
-              <span>Nuovo Servizio</span>
-            </Link>
-
-            <button
-              onClick={handleBloccaSchermo}
-              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-3 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-              title="Blocca postazione centrale"
-            >
-              <Lock size={15} />
-              <span>Blocca</span>
-            </button>
-          </div>
-        </div>
-
-        {/* GRIGLIA FUNZIONALITÀ CON CARD IN EVIDENZA */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {cards.map((card) => {
-            const Icon = card.icon;
-            const isHigh = card.highlighted;
-
-            return (
-              <Link
-                key={card.href}
-                href={card.href}
-                className={`group p-6 rounded-3xl transition-all duration-300 flex flex-col justify-between relative overflow-hidden ${
-                  isHigh
-                    ? "bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-700 text-white shadow-xl shadow-blue-500/25 ring-2 ring-blue-400/50 hover:shadow-2xl hover:scale-[1.02] border border-blue-400/40"
-                    : "bg-white border border-slate-200 shadow-sm hover:border-slate-300 hover:shadow-md hover:scale-[1.01]"
-                }`}
-              >
-                {/* Glow decorativo per la card in evidenza */}
-                {isHigh && (
-                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-white/10 rounded-full blur-2xl pointer-events-none" />
-                )}
-
-                <div>
-                  <div className="flex items-center justify-between mb-4 relative z-10">
-                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 ${
-                      isHigh
-                        ? "bg-white/20 text-white backdrop-blur-md border border-white/30 shadow-inner"
-                        : `${card.iconColor} border`
-                    }`}>
-                      <Icon size={24} strokeWidth={2.3} />
-                    </div>
-
-                    <span className={`text-[10px] font-extrabold uppercase tracking-wider px-3 py-1 rounded-full flex items-center gap-1.5 ${
-                      isHigh
-                        ? "bg-white/25 text-white backdrop-blur-sm border border-white/30"
-                        : "bg-slate-100 text-slate-600 border border-slate-200"
-                    }`}>
-                      {isHigh && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
-                      {card.badge}
-                    </span>
-                  </div>
-
-                  <h2 className={`text-xl font-extrabold transition flex items-center justify-between relative z-10 ${
-                    isHigh ? "text-white" : "text-slate-900 group-hover:text-blue-600"
-                  }`}>
-                    <span>{card.title}</span>
-                    <ArrowUpRight size={18} className={`transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 ${
-                      isHigh ? "text-white/80" : "text-slate-400 opacity-0 group-hover:opacity-100"
-                    }`} />
-                  </h2>
-
-                  <p className={`text-xs mt-2 leading-relaxed relative z-10 ${
-                    isHigh ? "text-blue-100" : "text-slate-500"
-                  }`}>
-                    {card.description}
-                  </p>
-                </div>
-
-                <div className={`pt-5 mt-4 border-t flex items-center justify-between text-xs font-bold transition relative z-10 ${
-                  isHigh 
-                    ? "border-white/20 text-white" 
-                    : "border-slate-100 text-slate-700 group-hover:text-blue-600"
-                }`}>
-                  <span>{isHigh ? "Entra nel Quadro Corse →" : "Accedi alla sezione"}</span>
-                  {isHigh && <Sparkles size={14} className="text-amber-300" />}
-                </div>
+            <div className="flex flex-col gap-3 sm:flex-row lg:flex-col lg:items-stretch">
+              <Link href="/prenotazione" className="rta-primary-action inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-6 py-3.5 text-base font-bold shadow-sm">
+                <PlusCircle size={22} aria-hidden="true" /> Nuovo trasporto
               </Link>
-            );
-          })}
-        </div>
+              <button type="button" onClick={handleBloccaSchermo} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-600 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-300">
+                <Lock size={15} aria-hidden="true" /> Blocca postazione
+              </button>
+            </div>
+          </div>
+        </section>
 
+        {sections.map((section) => (
+          <section key={section.id} aria-labelledby={section.id + "-titolo"} className="space-y-3">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <h2 id={section.id + "-titolo"} className={section.operativa ? "text-xl font-bold text-slate-900" : "text-lg font-bold text-slate-700"}>{section.title}</h2>
+                <p className="mt-1 text-sm text-slate-600">{section.description}</p>
+              </div>
+              {section.operativa && (
+                <Link href="/agenda" className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+                  <CalendarDays size={17} aria-hidden="true" /> Consulta agenda
+                </Link>
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              {section.cards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <Link key={card.href} href={card.href} className={section.operativa
+                    ? "rta-dashboard-card group rounded-2xl border border-blue-200 border-l-4 border-l-blue-600 bg-white p-5 shadow-sm md:p-6"
+                    : "rta-dashboard-card group rounded-2xl border border-slate-200 bg-slate-100 p-4 md:p-5"}>
+                    <div className="flex items-start gap-4">
+                      <div className={section.operativa
+                        ? "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-700"
+                        : "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600"}>
+                        <Icon size={section.operativa ? 24 : 20} aria-hidden="true" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <h3 className={section.operativa ? "text-xl font-bold text-slate-900" : "text-base font-bold text-slate-800"}>{card.title}</h3>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-600">{card.description}</p>
+                      </div>
+                      <ArrowUpRight size={18} aria-hidden="true" className="shrink-0 text-slate-500 group-hover:text-blue-700" />
+                    </div>
+                    <div className={section.operativa ? "mt-5 border-t border-blue-100 pt-3 text-sm font-semibold text-blue-700" : "mt-3 pl-14 text-sm font-semibold text-slate-700"}>
+                      {card.action}
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        ))}
+
+        <aside aria-labelledby="area-autista-titolo" className="flex flex-col gap-4 rounded-2xl border border-slate-300 bg-white p-4 sm:flex-row sm:items-center sm:justify-between md:p-5">
+          <div className="flex items-start gap-3">
+            <KeyRound size={22} aria-hidden="true" className="mt-1 shrink-0 text-slate-600" />
+            <div>
+              <h2 id="area-autista-titolo" className="text-base font-bold text-slate-800">Area autista con PIN</h2>
+              <p className="mt-1 text-sm text-slate-600">Accesso separato per consultare le corse assegnate e usare le funzioni di bordo.</p>
+            </div>
+          </div>
+          <Link href="/autista" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-sm font-semibold text-slate-800 transition hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600">
+            Accedi con PIN <ArrowUpRight size={16} aria-hidden="true" />
+          </Link>
+        </aside>
       </div>
     </div>
   );
