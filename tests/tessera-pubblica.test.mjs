@@ -8,11 +8,13 @@ const require = createRequire(import.meta.url);
 function carica(file, imports = {}, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText,
-    { exports, require: name => imports[name] ?? (name === "./id-paziente" ? ids : require(name)), Request, Response, URL, Error, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-test" } }, ...globals });
+    { exports, require: name => imports[name] ?? (name === "./id-paziente" ? ids : name === "@/components/TesseraAssociativa" ? documento : require(name)), Request, Response, URL, Error, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-test" } }, ...globals });
   return exports;
 }
 const ids = carica("app/lib/id-paziente.ts");
 const uuidDemo = "11111111-1111-4111-8111-111111111111";
+const datiAssociazione = carica("app/lib/associazione.ts").associazione;
+const documento = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione } });
 const tokens = carica("app/lib/tessera-token.ts");
 const associazione = { urlGestionale: "https://gestionale.romarta.it" };
 const links = carica("app/lib/link-tessera.ts", { "./associazione": { associazione } });
@@ -188,7 +190,7 @@ test("Condivisione: rifiuta URL interni, token mancanti e domini estranei prima 
 test("Apertura anonima: token assente/invalido/revocato senza dati, token valido con soli dati tessera", async () => {
   const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server");
   for (const scenario of ["assente", "invalido", "revocato", "valido"]) {
-    const values = [], refs = []; let cursor = 0, refCursor = 0, effect, calls = 0;
+    const values = [], refs = []; let cursor = 0, refCursor = 0, effect, calls = 0, fragmentRemoved = false;
     const fakeReact = { ...React,
       useState: initial => { const i = cursor++; if (!(i in values)) values[i] = initial; return [values[i], v => { values[i] = v; }]; },
       useRef: initial => { const i = refCursor++; return refs[i] ??= { current: initial }; },
@@ -196,8 +198,8 @@ test("Apertura anonima: token assente/invalido/revocato senza dati, token valido
     };
     const token = scenario === "assente" ? "" : scenario === "invalido" ? "id-paziente" : "a".repeat(43);
     const Page = carica("app/tessera-pubblica/page.tsx", { react: fakeReact, "@/app/lib/associazione": { associazione: { ...associazione, denominazione: "ROMA R.T.A." } }, "@/app/lib/link-tessera": links }, {
-      AbortController, window: { location: { hash: "#" + token, pathname: "/tessera-pubblica" }, history: { replaceState: () => {} } },
-      fetch: async (url, options) => { calls++; assert.equal(url, "/api/tessera-pubblica"); assert.ok(!options.headers.Authorization);
+      AbortController, window: { location: { hash: "#" + token, pathname: "/tessera-pubblica" }, history: { replaceState: () => { fragmentRemoved = true; } } },
+      fetch: async (url, options) => { calls++; assert.equal(url, "/api/tessera-pubblica"); assert.equal(JSON.parse(options.body).token, token); assert.ok(fragmentRemoved); assert.ok(!options.headers.Authorization);
         return scenario === "revocato" ? Response.json({ errore: "Collegamento non disponibile o scaduto." }, { status: 404 }) : Response.json({ tessera: { nome: "Mario", cognome: "Rossi", numero: "501", anno: 2026, emissione: null, scadenza: "2026-12-31" } }); },
     }).default;
     Page(); effect(); await new Promise(resolve => setTimeout(resolve, 0)); cursor = 0; refCursor = 0;
@@ -303,4 +305,28 @@ test("Pagina tessera interna: parametro UUID esatto, parametro 8 senza query paz
     assert.equal(calls.length, id === uuidDemo ? 1 : 0);
     if (calls.length) assert.deepEqual(Array.from(calls[0]), ["id", uuidDemo]);
   }
+});
+
+test("Grafica condivisa: loghi locali, istituzione e campi tessera senza anagrafica riservata", () => {
+  const React = require("react"), { renderToStaticMarkup } = require("react-dom/server");
+  const dati = { nome: "Mario", cognome: "Rossi", numero: "8", anno: 2026, emissione: "2026-11-09", scadenza: "2026-12-31", codice_fiscale: "SEGRETO", data_nascita: "1900-01-01" };
+  // Anche dettagli riservati accidentalmente aggiunti non sono renderizzati nella variante pubblica.
+  const publicHtml = renderToStaticMarkup(React.createElement(documento.default, { variante: "pubblica", dati, dettagliRiservati: { codiceFiscale: "SEGRETO", dataNascita: "1900-01-01" } }));
+  for (const value of ["Socio sostenitore", "Anno associativo", "09/11/2026", "31/12/2026", "Mario", "Rossi", datiAssociazione.denominazioneCompleta, datiAssociazione.indirizzo, datiAssociazione.logoRta, datiAssociazione.logoRegione, "Stampa / Salva tessera PDF", "data-stampa-tessera", "data-no-stampa"]) assert.ok(publicHtml.includes(value), value);
+  assert.ok(!/SEGRETO|Data di nascita|Codice fiscale|<nav|AccessoCentrale/.test(publicHtml));
+  for (const asset of [datiAssociazione.logoRta, datiAssociazione.logoRegione]) assert.ok(fs.existsSync("public" + asset));
+  const privateHtml = renderToStaticMarkup(React.createElement(documento.default, { variante: "interna", dati, dettagliRiservati: { codiceFiscale: "SEGRETO", dataNascita: "1900-01-01" } }));
+  assert.ok(privateHtml.includes("SEGRETO")); assert.ok(privateHtml.includes("Data di nascita"));
+  const css = fs.readFileSync("app/globals.css", "utf8");
+  assert.ok(css.includes("size: A4 portrait")); assert.ok(css.includes("overflow-wrap: anywhere")); assert.ok(css.includes("break-inside: avoid"));
+});
+test("Documento condiviso: stampa invoca il browser senza API o token", () => {
+  let printed = 0;
+  const Component = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione } }, { window: { print: () => { printed++; } } }).default;
+  const tree = Component({ variante: "pubblica", dati: { nome: "Mario", cognome: "Rossi", numero: "8", anno: 2026, emissione: null, scadenza: "2026-12-31" } });
+  const React = require("react"); let button;
+  function visit(node) { if (!node || typeof node !== "object") return; if (node.type === "button") button = node; React.Children.forEach(node.props?.children, visit); }
+  visit(tree); assert.ok(button); button.props.onClick(); assert.equal(printed, 1);
+  const source = fs.readFileSync("components/TesseraAssociativa.tsx", "utf8");
+  assert.ok(!/supabase|AccessoCentrale|fetch\(|console\.|analytics|location\.hash|localStorage/.test(source));
 });

@@ -66,6 +66,10 @@ html, body {
   margin: 14mm;
 }
 
+.rta-tessera-document {
+  overflow-wrap: anywhere;
+}
+
 @media print {
   body:has([data-stampa-tessera]) {
     page: tessera-associativa;
@@ -99,5 +103,14 @@ html, body {
     break-inside: avoid;
     print-color-adjust: exact;
     -webkit-print-color-adjust: exact;
+  }
+
+  [data-stampa-tessera] .rta-tessera-document dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-stampa-tessera] .rta-tessera-document header,
+  [data-stampa-tessera] .rta-tessera-document footer {
+    break-inside: avoid;
   }
 }
