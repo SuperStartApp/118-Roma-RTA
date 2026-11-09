@@ -3,10 +3,11 @@
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
 import ErroreCaricamento from "@/components/ErroreCaricamento";
-import { associazione } from "@/app/lib/associazione";
 import { caricaPazienti, corrispondeRicercaPaziente } from "@/app/lib/pazienti";
 import Link from "next/link";
 import { condividiTessera } from "@/app/lib/condivisione-tessera";
+import { apriTesseraWhatsApp } from "@/app/lib/invio-tessera-whatsapp";
+import { idPazienteValido, linkTesseraInterna } from "@/app/lib/id-paziente";
 import { 
   Users, 
   Search, 
@@ -222,48 +223,37 @@ export default function PazientiPage() {
   const [condivisioneInCorso, setCondivisioneInCorso] = useState(false);
   const [whatsappPronto, setWhatsappPronto] = useState<string | null>(null);
   const [esitoCondivisione, setEsitoCondivisione] = useState("");
+  const [pazienteCondivisione, setPazienteCondivisione] = useState<string | null>(null);
+  const [erroreCondivisione, setErroreCondivisione] = useState(false);
   const revocaLink = async (id: string) => {
     if (condivisioneInCorso || !window.confirm("Revocare il link pubblico? Il cliente non potrà più usarlo.")) return;
-    setCondivisioneInCorso(true); setWhatsappPronto(null);
+    setCondivisioneInCorso(true); setWhatsappPronto(null); setPazienteCondivisione(String(id)); setErroreCondivisione(false);
     try { await condividiTessera(id, "revoca"); setEsitoCondivisione("Link revocato."); }
-    catch (error) { setEsitoCondivisione(error instanceof Error ? error.message : "Revoca non riuscita."); }
+    catch (error) { setErroreCondivisione(true); setEsitoCondivisione(error instanceof Error ? error.message : "Revoca non riuscita."); }
     finally { setCondivisioneInCorso(false); }
   };
 
   // WHATSAPP
   const apriWhatsApp = async (p: PazienteConStorico) => {
     if (condivisioneInCorso) return;
-    if (!p.telefono?.trim()) {
-      alert("Numero telefonico mancante: aggiungilo nella scheda paziente prima di inviare la tessera.");
-      return;
-    }
+    setPazienteCondivisione(String(p.id)); setErroreCondivisione(false); setWhatsappPronto(null);
     if (!p.numero_tessera) {
-      alert("Questo paziente non ha ancora un numero tessera. Gestisci il rilascio dalla scheda paziente prima dell’invio.");
-      return;
+      setErroreCondivisione(true); setEsitoCondivisione("Assegna e salva il numero tessera prima di condividerla."); return;
     }
-    let num = p.telefono.replace(/\D/g, "");
-    if (!num) {
-      alert("Il recapito non contiene un numero telefonico utilizzabile. Verifica la scheda paziente.");
-      return;
-    }
-    if (num.length === 10 && !num.startsWith("39")) {
-      num = "39" + num;
-    }
-    setCondivisioneInCorso(true); setWhatsappPronto(null); setEsitoCondivisione("");
+    setCondivisioneInCorso(true); setEsitoCondivisione("Preparazione del link e apertura di WhatsApp...");
     try {
-    const { link: linkTessera } = await condividiTessera(p.id, "crea");
-    if (!linkTessera) throw new Error("Link non creato.");
-    const messaggio =
-      `*${associazione.denominazione} — Tessera associativa*\n\n` +
-      `Gentile *${p.nome} ${p.cognome}*,\n` +
-      `può consultare, stampare o salvare in PDF la Sua tessera associativa al seguente collegamento:\n` +
-      `${linkTessera}\n\n` +
-      `Un cordiale saluto da ${associazione.denominazione}.`;
-
-    setWhatsappPronto(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`);
-    setEsitoCondivisione("Nuovo link pronto, valido fino alla scadenza associativa della tessera. Il precedente è stato invalidato. Apri WhatsApp per inviarlo.");
-    } catch (error) { setEsitoCondivisione(error instanceof Error ? error.message : "Link non creato."); }
-    finally { setCondivisioneInCorso(false); }
+      const risultato = await apriTesseraWhatsApp(p.id, p.telefono || "", {
+        creaLink: id => condividiTessera(id, "crea"),
+        apriFinestra: () => window.open("about:blank", "_blank"),
+      });
+      setWhatsappPronto(risultato.url);
+      setEsitoCondivisione(risultato.aperto
+        ? "WhatsApp aperto con il messaggio pronto. Premi Invia in WhatsApp per consegnarlo. Il precedente link tessera non è più valido."
+        : "Il browser non ha aperto WhatsApp. Usa Apri WhatsApp qui sotto: il link è già pronto, non occorre rigenerarlo.");
+    } catch (error) {
+      setErroreCondivisione(true);
+      setEsitoCondivisione(error instanceof Error ? error.message : "Impossibile preparare WhatsApp. Riprova o contatta la centrale.");
+    } finally { setCondivisioneInCorso(false); }
   };
 
   const filteredPazienti = pazienti.filter((p) => corrispondeRicercaPaziente(p, search));
@@ -273,8 +263,6 @@ export default function PazientiPage() {
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
-        {esitoCondivisione && <p role="status" className="rounded-xl border bg-white p-4 text-sm">{esitoCondivisione}</p>}
-        {whatsappPronto && <a href={whatsappPronto} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-xl bg-green-700 px-4 font-bold text-white">Apri WhatsApp e invia tessera</a>}
         
         {/* INTESTAZIONE */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-200">
@@ -410,6 +398,10 @@ export default function PazientiPage() {
                     </div>
                   </div>
 
+                  {pazienteCondivisione === String(p.id) && <div role={erroreCondivisione ? "alert" : "status"} className={erroreCondivisione ? "rounded-lg border border-rose-300 bg-rose-50 p-3 text-sm text-rose-900" : "rounded-lg border bg-slate-50 p-3 text-sm"}>
+                    <p>{esitoCondivisione}</p>
+                    {whatsappPronto && <a href={whatsappPronto} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex min-h-11 items-center rounded-lg bg-green-700 px-4 font-bold text-white">Apri WhatsApp</a>}
+                  </div>}
                   {/* Barra Azioni */}
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -421,13 +413,13 @@ export default function PazientiPage() {
                           title={!p.telefono?.trim() ? "Aggiungi un numero telefonico nella scheda paziente" : !haTessera ? "Numero tessera non ancora assegnato" : "Invia il collegamento alla tessera su WhatsApp"}
                         >
                           <MessageSquare size={14} />
-                          <span>{!p.telefono?.trim() ? "Telefono mancante" : !haTessera ? "Tessera da assegnare" : "Invia tessera WhatsApp"}</span>
+                          <span>{!p.telefono?.trim() ? "Telefono mancante" : !haTessera ? "Tessera da assegnare" : condivisioneInCorso && pazienteCondivisione === String(p.id) ? "Preparazione WhatsApp..." : "Invia tessera WhatsApp"}</span>
                         </button>
 
                       {haTessera && <button type="button" disabled={condivisioneInCorso} onClick={() => void revocaLink(p.id)} className="min-h-11 rounded-lg border px-3 text-xs font-bold disabled:opacity-50">Revoca link</button>}
-                      {haTessera && (
+                      {haTessera && idPazienteValido(p.id) && (
                         <Link
-                          href={`/tessera/${p.id}`}
+                          href={linkTesseraInterna(p)}
                           target="_blank"
                           className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-lg text-xs font-bold transition"
                           title="Vedi Tessera Ufficiale"
@@ -436,6 +428,7 @@ export default function PazientiPage() {
                           <span>Tessera</span>
                         </Link>
                       )}
+                      {!idPazienteValido(p.id) && <p role="alert" className="text-xs text-rose-800">Identificativo scheda non valido. Aggiorna l’elenco prima di aprire o condividere la tessera.</p>}
                     </div>
 
                     <Link

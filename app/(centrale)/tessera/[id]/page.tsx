@@ -4,6 +4,7 @@ import React, { useEffect, useState, Suspense } from "react";
 import { supabase } from "@/app/lib/supabase";
 import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { associazione } from "@/app/lib/associazione";
+import { idPazienteValido } from "@/app/lib/id-paziente";
 import { useParams } from "next/navigation";
 import { Printer, Loader2 } from "lucide-react";
 
@@ -18,6 +19,12 @@ function TesseraContent() {
       if (!params?.id) return;
       setLoading(true);
       setErroreCaricamento(null);
+      if (!idPazienteValido(params.id)) {
+        setPaziente(null);
+        setErroreCaricamento("Collegamento interno non valido: occorre l’UUID del paziente. Riapri la tessera dalla scheda paziente aggiornata.");
+        setLoading(false);
+        return;
+      }
       try {
         const { data, error } = await supabase
           .from("pazienti")

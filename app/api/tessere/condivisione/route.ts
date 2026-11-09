@@ -21,12 +21,16 @@ export async function POST(request: Request) {
     const { data: user, error: authError } = await client.auth.getUser(bearer.slice(7));
     if (authError || !user.user) return risposta({ errore: "Sessione non valida." }, 401);
     const { data: abilitato, error: ruoloError } = await client.rpc("roma_rta_operatore_abilitato");
-    if (ruoloError || abilitato !== true) return risposta({ errore: "Operatore non abilitato." }, 403);
+    if (ruoloError) return risposta({ errore: "Verifica operatore non disponibile. Contatta l’amministratore per controllare la configurazione degli accessi." }, 503);
+    if (abilitato !== true) return risposta({ errore: "Operatore non abilitato." }, 403);
     const raw = await request.text();
     if (raw.length > 1024) return risposta({ errore: "Richiesta non valida." }, 400);
     let body;
     try { body = JSON.parse(raw); } catch { return risposta({ errore: "Richiesta non valida." }, 400); }
-    if (!body || typeof body.pazienteId !== "string" || !/^[0-9a-f-]{36}$/i.test(body.pazienteId) || !["crea", "revoca"].includes(body.azione)) return risposta({ errore: "Richiesta non valida." }, 400);
+    if (!body || !["crea", "revoca"].includes(body.azione)) return risposta({ errore: "Richiesta non valida." }, 400);
+    if (typeof body.pazienteId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.pazienteId)) {
+      return risposta({ errore: "Identificativo paziente non compatibile con la condivisione pubblica: è richiesto un UUID. Contatta l’amministratore per verificare schema e versione del gestionale. Nessun link creato." }, 400);
+    }
     if (body.azione === "revoca") {
       const { error } = await client.rpc("roma_rta_revoca_tessera", { p_paziente: body.pazienteId });
       return error ? erroreRpc(error) : risposta({ revocato: true }, 200);

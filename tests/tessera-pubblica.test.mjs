@@ -8,13 +8,16 @@ const require = createRequire(import.meta.url);
 function carica(file, imports = {}, globals = {}) {
   const exports = {};
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText,
-    { exports, require: name => imports[name] ?? require(name), Request, Response, URL, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-test" } }, ...globals });
+    { exports, require: name => imports[name] ?? (name === "./id-paziente" ? ids : require(name)), Request, Response, URL, Error, process: { env: { NEXT_PUBLIC_SUPABASE_URL: "https://example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "public-test" } }, ...globals });
   return exports;
 }
+const ids = carica("app/lib/id-paziente.ts");
+const uuidDemo = "11111111-1111-4111-8111-111111111111";
 const tokens = carica("app/lib/tessera-token.ts");
 const associazione = { urlGestionale: "https://gestionale.romarta.it" };
 const links = carica("app/lib/link-tessera.ts", { "./associazione": { associazione } });
 const whatsapp = carica("app/lib/whatsapp.ts", { "./associazione": { associazione } });
+const invio = carica("app/lib/invio-tessera-whatsapp.ts", { "./whatsapp": whatsapp, "./link-tessera": links });
 const post = body => new Request("https://example.test/api/tessera-pubblica", { method: "POST", body: JSON.stringify(body) });
 test("Token: 256 bit casuali, formato URL e hash stabile distinto dal segreto", () => {
   const values = new Set(Array.from({ length: 1000 }, () => tokens.nuovoToken()));
@@ -145,7 +148,7 @@ test("SQL proposto: contratto di scadenza annuale e sicurezza, senza eseguire DD
 });
 
 test("Partenza da Pazienti: API -> link validato -> WhatsApp senza ID o credenziali", async () => {
-  const s = gestione(); let whatsappUrl;
+  const s = gestione(); let whatsappUrl, erroreVisibile, esitoVisibile, loading;
   const client = carica("app/lib/condivisione-tessera.ts", {
     "./supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "sessione-test" } }, error: null }) } } },
     "./link-tessera": links,
@@ -156,17 +159,21 @@ test("Partenza da Pazienti: API -> link validato -> WhatsApp senza ID o credenzi
   function visit(node) { if (ts.isVariableDeclaration(node) && node.name.getText(root) === "apriWhatsApp") declaration = "const apriWhatsApp = " + node.initializer.getText(root) + "; apriWhatsApp;"; ts.forEachChild(node, visit); }
   visit(root); assert.ok(declaration);
   const send = vm.runInNewContext(ts.transpileModule(declaration, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText, {
-    condivisioneInCorso: false, condividiTessera: client.condividiTessera,
+    Error, condivisioneInCorso: false, condividiTessera: client.condividiTessera, apriTesseraWhatsApp: invio.apriTesseraWhatsApp,
+    setPazienteCondivisione: () => {}, setErroreCondivisione: value => { erroreVisibile = value; }, window: { open: () => null },
     associazione: { ...associazione, denominazione: "ROMA R.T.A." },
-    setCondivisioneInCorso: () => {}, setEsitoCondivisione: () => {}, setWhatsappPronto: value => { whatsappUrl = value; },
+    setCondivisioneInCorso: value => { loading = value; }, setEsitoCondivisione: value => { esitoVisibile = value; }, setWhatsappPronto: value => { whatsappUrl = value; },
     alert: () => assert.fail("Invio inatteso fallito"), encodeURIComponent,
   });
   const id = "11111111-1111-4111-8111-111111111111";
-  await send({ id, nome: "Mario", cognome: "Rossi", telefono: "3331111111", numero_tessera: 501 });
+  await send({ id, nome: "Mario", cognome: "Rossi", telefono: "3331111111", numero_tessera: 8 });
+  assert.equal(s.calls.find(([name]) => name === "roma_rta_condividi_tessera")[1].p_paziente, id);
   const message = new URL(whatsappUrl).searchParams.get("text");
   const link = message.match(/https:\/\/gestionale\.romarta\.it\/[^\s]+/)[0];
   assert.equal(links.verificaLinkTesseraPubblica(link), link);
   assert.ok(!message.includes(id)); assert.ok(!message.includes("sessione-test")); assert.ok(!message.includes("/tessera/"));
+  await send({ id: "8", nome: "Mario", cognome: "Rossi", telefono: "3331111111", numero_tessera: 501 });
+  assert.equal(whatsappUrl, null); assert.equal(erroreVisibile, true); assert.equal(loading, false); assert.match(esitoVisibile, /richiesto un UUID/);
 });
 
 test("Condivisione: rifiuta URL interni, token mancanti e domini estranei prima di WhatsApp", async () => {
@@ -174,7 +181,7 @@ test("Condivisione: rifiuta URL interni, token mancanti e domini estranei prima 
     const client = carica("app/lib/condivisione-tessera.ts", {
       "./supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "test" } }, error: null }) } } }, "./link-tessera": links,
     }, { fetch: async () => Response.json({ link }) });
-    await assert.rejects(client.condividiTessera("id", "crea"), /pubblico/);
+    await assert.rejects(client.condividiTessera(uuidDemo, "crea"), /pubblico/);
   }
 });
 
@@ -198,5 +205,102 @@ test("Apertura anonima: token assente/invalido/revocato senza dati, token valido
     assert.equal(calls, ["assente", "invalido"].includes(scenario) ? 0 : 1);
     assert.equal(html.includes("Mario"), scenario === "valido");
     assert.ok(!/<nav|Accedi alla centrale|Centrale operativa|Codice fiscale|Data di nascita/.test(html));
+  }
+});
+
+test("WhatsApp: finestra aperta sincronicamente prima della RPC, navigazione solo dopo successo", async () => {
+  const calls = []; let resolve;
+  const pending = new Promise(ok => { resolve = ok; });
+  const popup = { closed: false, opener: {}, close: () => calls.push("close"), location: { replace: url => calls.push(url) } };
+  const result = invio.apriTesseraWhatsApp(uuidDemo, "3331111111", {
+    apriFinestra: () => { calls.push("open"); return popup; },
+    creaLink: () => { calls.push("rpc"); return pending; },
+  });
+  assert.deepEqual(calls, ["open", "rpc"]); assert.equal(popup.opener, null);
+  resolve({ link: links.creaLinkTesseraPubblica("a".repeat(43)) });
+  const outcome = await result; assert.equal(outcome.aperto, true); assert.equal(calls[2], outcome.url);
+  const url = new URL(outcome.url); assert.equal(url.searchParams.get("text"), "ROMA R.T.A. - La tua tessera associativa: " + links.creaLinkTesseraPubblica("a".repeat(43)));
+});
+test("WhatsApp: popup bloccato o chiuso lascia un link utilizzabile senza rigenerazione", async () => {
+  for (const popup of [null, { closed: true, opener: null }]) {
+    let calls = 0;
+    const result = await invio.apriTesseraWhatsApp(uuidDemo, "+39 3331111111", { apriFinestra: () => popup, creaLink: async () => { calls++; return { link: links.creaLinkTesseraPubblica("a".repeat(43)) }; } });
+    assert.equal(result.aperto, false); assert.equal(calls, 1); assert.equal(new URL(result.url).pathname, "/393331111111");
+  }
+});
+test("WhatsApp: errore API o link interno chiude la finestra senza navigare", async () => {
+  for (const invalidLink of [false, true]) {
+    let closed = 0, navigated = 0;
+    const popup = { closed: false, opener: null, close: () => { closed++; }, location: { replace: () => { navigated++; } } };
+    await assert.rejects(invio.apriTesseraWhatsApp(uuidDemo, "3331111111", { apriFinestra: () => popup, creaLink: async () => { if (invalidLink) return { link: "https://gestionale.romarta.it/tessera/8" }; throw new Error("Operatore non abilitato."); } }));
+    assert.equal(closed, 1); assert.equal(navigated, 0);
+  }
+  let calls = 0;
+  await assert.rejects(invio.apriTesseraWhatsApp(uuidDemo, "telefono errato", { apriFinestra: () => { calls++; }, creaLink: async () => { calls++; } }), /Numero WhatsApp non valido/);
+  assert.equal(calls, 0);
+});
+test("API gestione: ID numerico rifiutato esplicitamente prima di crea/revoca RPC", async () => {
+  for (const id of [8, "8", "-".repeat(36)]) {
+    const s = gestione();
+    const response = await s.api.POST(new Request("https://example.test/api/tessere/condivisione", { method: "POST", headers: { Authorization: "Bearer sessione-test" }, body: JSON.stringify({ pazienteId: id, azione: "crea" }) }));
+    assert.equal(response.status, 400); assert.match((await response.json()).errore, /richiesto un UUID/);
+    assert.ok(!s.calls.some(([name]) => name === "roma_rta_condividi_tessera"));
+  }
+});
+test("Client condivisione: rete e risposte HTML restituiscono errori comprensibili", async () => {
+  for (const fetch of [async () => { throw new Error("NETWORK_PRIVATE_DETAIL"); }, async () => new Response("<html>errore</html>", { status: 503 })]) {
+    const client = carica("app/lib/condivisione-tessera.ts", { "./supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "test" } }, error: null }) } } }, "./link-tessera": links }, { fetch });
+    await assert.rejects(client.condividiTessera(uuidDemo, "crea"), error => !error.message.includes("NETWORK_PRIVATE_DETAIL") && /connessione|Risposta del servizio/.test(error.message));
+  }
+});
+
+test("Identita: numero tessera 8 non sostituisce UUID nel link interno", () => {
+  const paziente = { id: uuidDemo, numero_tessera: 8, indice: 8, vecchio_id: 8 };
+  assert.equal(ids.linkTesseraInterna(paziente), "/tessera/" + uuidDemo);
+  for (const value of [8, "8", null, undefined, { id: uuidDemo }]) {
+    assert.equal(ids.idPazienteValido(value), false);
+    assert.throws(() => ids.linkTesseraInterna({ id: value }), /richiesto un UUID/);
+  }
+});
+test("ID invalido: nessuna conversione, popup, sessione o richiesta HTTP", async () => {
+  for (const value of [8, "8", null, undefined]) {
+    let calls = 0;
+    await assert.rejects(invio.apriTesseraWhatsApp(value, "3331111111", { apriFinestra: () => { calls++; }, creaLink: async () => { calls++; } }), /richiesto un UUID/);
+    const client = carica("app/lib/condivisione-tessera.ts", { "./supabase": { supabase: { auth: { getSession: () => { calls++; } } } }, "./link-tessera": links }, { fetch: () => { calls++; } });
+    await assert.rejects(client.condividiTessera(value, "crea"), /richiesto un UUID/);
+    assert.equal(calls, 0);
+  }
+});
+test("Caricamento rubrica: arricchimento conserva UUID anche con numero tessera 8", async () => {
+  const file = "app/(centrale)/pazienti/page.tsx";
+  const root = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  function visit(node) { if (ts.isFunctionDeclaration(node) && node.name?.text === "fetchPazientiEStorico") declaration = node.getText(root); ts.forEachChild(node, visit); }
+  visit(root); assert.ok(declaration);
+  let rows;
+  const carica = vm.runInNewContext(ts.transpileModule(declaration + "; fetchPazientiEStorico;", { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText, {
+    caricaPazienti: async () => ({ data: [{ id: uuidDemo, numero_tessera: 8, nome: "Mario", cognome: "Rossi" }], error: null }),
+    supabase: { from: () => ({ select: () => ({ order: async () => ({ data: [{ paziente_id: uuidDemo, data_appuntamento: "2026-11-01", annullata_il: null }], error: null }) }) }) },
+    setLoading: () => {}, setErroreCaricamento: () => {}, setPazienti: value => { rows = value; },
+  });
+  await carica(); assert.equal(rows[0].id, uuidDemo); assert.equal(rows[0].numero_tessera, 8); assert.equal(rows[0].totaleCorse, 1);
+});
+
+test("Pagina tessera interna: parametro UUID esatto, parametro 8 senza query pazienti", async () => {
+  const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server");
+  for (const id of [uuidDemo, "8"]) {
+    const effects = [], calls = [];
+    const query = { select: () => query, eq: (...args) => { calls.push(args); return query; }, single: async () => ({ data: null, error: null }) };
+    const Page = carica("app/(centrale)/tessera/[id]/page.tsx", {
+      react: { ...React, useEffect: cb => { effects.push(cb); } },
+      "@/app/lib/supabase": { supabase: { from: name => { assert.equal(name, "pazienti"); return query; } } },
+      "@/app/lib/id-paziente": ids, "@/app/lib/associazione": { associazione },
+      "@/components/ErroreCaricamento": { __esModule: true, default: () => null },
+      "next/navigation": { useParams: () => ({ id }) },
+    }).default;
+    renderToStaticMarkup(React.createElement(Page)); for (const effect of effects) effect();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls.length, id === uuidDemo ? 1 : 0);
+    if (calls.length) assert.deepEqual(Array.from(calls[0]), ["id", uuidDemo]);
   }
 });
