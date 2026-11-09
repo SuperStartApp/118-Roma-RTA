@@ -150,6 +150,17 @@ function Navbar() {
   );
 }
 
+// Il pathname viene letto sotto Suspense, come richiesto da Cache Components.
+function ContenutoLayout({ children }: { children: React.ReactNode }) {
+  const pubblica = usePathname() === "/tessera-pubblica";
+  return pubblica ? <main>{children}</main> : (
+    <AccessoCentrale>
+      <Navbar />
+      <main className="flex-1 w-full pb-24 xl:pb-8">{children}</main>
+    </AccessoCentrale>
+  );
+}
+
 export default function RootLayout({
   children,
 }: {
@@ -159,13 +170,7 @@ export default function RootLayout({
     <html lang="it">
       <body className={`${inter.className} min-h-screen bg-slate-50 text-slate-900 flex flex-col`}>
         <Suspense fallback={<div className="p-6 text-center text-sm text-slate-600">Verifica accesso alla centrale…</div>}>
-          <AccessoCentrale>
-          <Navbar />
-        
-        <main className="flex-1 w-full pb-24 xl:pb-8">
-          {children}
-        </main>
-          </AccessoCentrale>
+          <ContenutoLayout>{children}</ContenutoLayout>
         </Suspense>
       </body>
     </html>

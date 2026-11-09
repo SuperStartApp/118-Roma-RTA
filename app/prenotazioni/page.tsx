@@ -6,6 +6,7 @@ import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { annullaPrenotazione, registraRimborso, cambiaPagamento } from "@/app/lib/operazioni-prenotazioni";
 import { statoPrenotazione, rimborsoPendente, formattaImporto, costoValido, type DatiEconomiciPrenotazione } from "@/app/lib/stato-prenotazione";
 import Link from "next/link";
+import AvvisaAutista from "@/components/AvvisaAutista";
 import { 
   Search, 
   Calendar, 
@@ -38,7 +39,7 @@ interface Prenotazione extends DatiEconomiciPrenotazione {
   arrivo_citta?: string;
   arrivo_via?: string;
   pazienti: { id: string; nome: string; cognome: string; telefono?: string } | null;
-  autisti: { id: string; nome: string; cognome: string } | null;
+  autisti: { id: string; nome: string; cognome: string; telefono?: string | null } | null;
 }
 
 export default function ListaPrenotazioni() {
@@ -81,7 +82,7 @@ export default function ListaPrenotazioni() {
     try {
       const { data, error } = await supabase
         .from("autisti")
-        .select("id, nome, cognome")
+        .select("id, nome, cognome, telefono")
         .eq("attivo", true)
         .order("cognome", { ascending: true });
       if (error) throw error;
@@ -97,7 +98,7 @@ export default function ListaPrenotazioni() {
     try {
       const { data, error } = await supabase
         .from("prenotazioni")
-        .select(`*, pazienti(id, nome, cognome, telefono), autisti(id, nome, cognome)`)
+        .select(`*, pazienti(id, nome, cognome, telefono), autisti(id, nome, cognome, telefono)`)
         .order("data_appuntamento", { ascending: false })
         .order("ora_appuntamento", { ascending: true });
 
@@ -490,6 +491,7 @@ export default function ListaPrenotazioni() {
                           <Eye size={13} /> Scheda
                         </Link>
                         
+                        <AvvisaAutista autistaId={p.autista_id} telefono={p.autisti?.telefono} />
                         {azionePrenotazione(p)}
                       </div>
                     </div>
@@ -591,6 +593,7 @@ export default function ListaPrenotazioni() {
                             </Link>
 
                             {/* ANNULLAMENTO / RIMBORSO */}
+                            <AvvisaAutista autistaId={p.autista_id} telefono={p.autisti?.telefono} />
                             {azionePrenotazione(p)}
                           </div>
                         </td>

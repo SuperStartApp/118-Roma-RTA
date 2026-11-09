@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
+import { condividiTessera } from "@/app/lib/condivisione-tessera";
 import { associazione } from "@/app/lib/associazione";
 import { useRouter } from "next/navigation";
 import { 
@@ -199,7 +200,12 @@ export default function AutistaDashboard() {
 
     const cleanPhone = corsa.pazienti.telefono.replace(/\D/g, "");
     const numero = cleanPhone.startsWith("39") ? cleanPhone : `39${cleanPhone}`;
-    const linkTessera = new URL(`/tessera/${encodeURIComponent(corsa.pazienti.id)}`, associazione.urlGestionale).href;
+    let linkTessera: string;
+    try {
+      const risultato = await condividiTessera(corsa.pazienti.id, "crea");
+      if (!risultato.link) throw new Error("Link non creato.");
+      linkTessera = risultato.link;
+    } catch { alert("Link non creato. Contatta la centrale."); return; }
 
     const msg = 
       `🚑 *TESSERA SOCIO SOSTENITORE*\n\n` +

@@ -6,6 +6,7 @@ import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { statoPrenotazione, formattaImporto } from "@/app/lib/stato-prenotazione";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import AvvisaAutista from "@/components/AvvisaAutista";
 import { 
   ArrowLeft, 
   User, 
@@ -212,6 +213,7 @@ function CorsaDetailContent() {
         >
           <MessageCircle size={18} /> Invia Dettagli & Tessera via WhatsApp
         </button>
+        <AvvisaAutista autistaId={corsa.autista_id} telefono={corsa.autisti?.telefono} />
       </div>
 
       {/* DETTAGLI TRATTA CON NAVIGATORE 1-TAP */}

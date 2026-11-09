@@ -14,8 +14,8 @@ export function isSupabaseServerConfigured() {
   return getServerConfig() !== null;
 }
 
-// Factory predisposta per un uso futuro: nessun client viene creato all'import.
-// La route di preparazione non richiama questa funzione.
+// Client dedicato alle RPC server: nessuna sessione o Authorization del browser.
+// Nessun client viene creato all'import.
 export function createSupabaseServerClient() {
   const config = getServerConfig();
   if (!config) return null;

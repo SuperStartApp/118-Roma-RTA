@@ -65,3 +65,8 @@ Su ambiente isolato o dati sintetici verificare a livello database:
 7. Nessuna regressione sugli altri progetti e nessuna esposizione da viste, funzioni, copie materializzate o schemi alternativi.
 
 I test locali utilizzano mock Auth/RPC e rendering React, senza chiamate Supabase. I controlli testuali sullo script non sostituiscono un'esecuzione PostgreSQL isolata o il collaudo delle RLS effettive. Non è stato installato un database locale né sono state applicate migrazioni remote.
+
+
+## Estensione tessera pubblica (proposta successiva)
+
+La pagina /tessera-pubblica e le nuove API sono descritte in [tessera-pubblica-avviso-autista.md](tessera-pubblica-avviso-autista.md). Le tessere interne /tessera/<id> restano protette. La nuova migrazione separata non risulta applicata da questa sessione; questa guida documenta la precedente Fase 1.

@@ -16,9 +16,9 @@ const sezioni = [
     passi: [
       "Cerca per nome, cognome, telefono o codice fiscale. Usa Modifica per aggiornare l’anagrafica.",
       "Per il tesseramento inserisci il numero oppure usa Assegna Prossimo N°. Verifica l’anno e salva la scheda.",
-      "Apri Tessera dalla centrale autenticata per stamparla o salvarla in PDF. La condivisione pubblica del collegamento è temporaneamente sospesa.",
+      "Apri Tessera dalla centrale autenticata per stamparla o salvarla in PDF. Per il cliente usa Invia tessera WhatsApp, poi Apri WhatsApp e invia tessera.",
     ],
-    nota: "Non inviare il collegamento WhatsApp come se fosse pubblico: attualmente richiede l’accesso centrale. La data di emissione appare soltanto se registrata.",
+    nota: "Il nuovo link personale scade il 31 dicembre dell’anno associativo e sostituisce il precedente; Revoca link lo disabilita. Richiede la migrazione SQL dedicata. I vecchi link con ID restano riservati alla centrale.",
   },
   {
     titolo: "Gestione corse", href: "/prenotazioni",

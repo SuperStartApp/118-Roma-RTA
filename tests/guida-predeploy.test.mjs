@@ -107,7 +107,7 @@ test("D/E: emissione verificata prima di WhatsApp e link tessera sempre pubblico
       }),
     };
     const send = named("app/autista/dashboard/page.tsx", "inviaTesseraWhatsApp", {
-      associazione, supabase: { rpc: async () => ({ data: 501, error: null }), from: () => query },
+      condividiTessera: async () => ({ link: "https://gestionale.romarta.it/tessera-pubblica#token-demo" }), associazione, supabase: { rpc: async () => ({ data: 501, error: null }), from: () => query },
       setCorse: (fn) => { displayed = fn(displayed); }, alert: noop,
       window: { location: { origin: "http://localhost:3000" }, open: (url) => { opened = url; } },
     });
@@ -118,7 +118,7 @@ test("D/E: emissione verificata prima di WhatsApp e link tessera sempre pubblico
     } else {
       assert.equal(displayed[0].pazienti.numero_tessera, 501);
       const message = new URL(opened).searchParams.get("text");
-      assert.ok(message.includes("https://gestionale.romarta.it/tessera/p-demo"));
+      assert.ok(message.includes("https://gestionale.romarta.it/tessera-pubblica#token-demo"));
       assert.ok(!message.includes("localhost"));
     }
   }

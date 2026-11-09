@@ -6,6 +6,7 @@ import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { associazione } from "@/app/lib/associazione";
 import { caricaPazienti, corrispondeRicercaPaziente } from "@/app/lib/pazienti";
 import Link from "next/link";
+import { condividiTessera } from "@/app/lib/condivisione-tessera";
 import { 
   Users, 
   Search, 
@@ -218,8 +219,20 @@ export default function PazientiPage() {
     }
   };
 
+  const [condivisioneInCorso, setCondivisioneInCorso] = useState(false);
+  const [whatsappPronto, setWhatsappPronto] = useState<string | null>(null);
+  const [esitoCondivisione, setEsitoCondivisione] = useState("");
+  const revocaLink = async (id: string) => {
+    if (condivisioneInCorso || !window.confirm("Revocare il link pubblico? Il cliente non potrà più usarlo.")) return;
+    setCondivisioneInCorso(true); setWhatsappPronto(null);
+    try { await condividiTessera(id, "revoca"); setEsitoCondivisione("Link revocato."); }
+    catch (error) { setEsitoCondivisione(error instanceof Error ? error.message : "Revoca non riuscita."); }
+    finally { setCondivisioneInCorso(false); }
+  };
+
   // WHATSAPP
-  const apriWhatsApp = (p: PazienteConStorico) => {
+  const apriWhatsApp = async (p: PazienteConStorico) => {
+    if (condivisioneInCorso) return;
     if (!p.telefono?.trim()) {
       alert("Numero telefonico mancante: aggiungilo nella scheda paziente prima di inviare la tessera.");
       return;
@@ -236,7 +249,10 @@ export default function PazientiPage() {
     if (num.length === 10 && !num.startsWith("39")) {
       num = "39" + num;
     }
-    const linkTessera = new URL(`/tessera/${encodeURIComponent(p.id)}`, associazione.urlGestionale).href;
+    setCondivisioneInCorso(true); setWhatsappPronto(null); setEsitoCondivisione("");
+    try {
+    const { link: linkTessera } = await condividiTessera(p.id, "crea");
+    if (!linkTessera) throw new Error("Link non creato.");
     const messaggio =
       `*${associazione.denominazione} — Tessera associativa*\n\n` +
       `Gentile *${p.nome} ${p.cognome}*,\n` +
@@ -244,7 +260,10 @@ export default function PazientiPage() {
       `${linkTessera}\n\n` +
       `Un cordiale saluto da ${associazione.denominazione}.`;
 
-    window.open(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`, "_blank");
+    setWhatsappPronto(`https://wa.me/${num}?text=${encodeURIComponent(messaggio)}`);
+    setEsitoCondivisione("Nuovo link pronto, valido fino alla scadenza associativa della tessera. Il precedente è stato invalidato. Apri WhatsApp per inviarlo.");
+    } catch (error) { setEsitoCondivisione(error instanceof Error ? error.message : "Link non creato."); }
+    finally { setCondivisioneInCorso(false); }
   };
 
   const filteredPazienti = pazienti.filter((p) => corrispondeRicercaPaziente(p, search));
@@ -254,6 +273,8 @@ export default function PazientiPage() {
   return (
     <div className="min-h-screen bg-slate-50 py-6 px-4 md:px-8">
       <div className="max-w-6xl mx-auto space-y-6">
+        {esitoCondivisione && <p role="status" className="rounded-xl border bg-white p-4 text-sm">{esitoCondivisione}</p>}
+        {whatsappPronto && <a href={whatsappPronto} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center rounded-xl bg-green-700 px-4 font-bold text-white">Apri WhatsApp e invia tessera</a>}
         
         {/* INTESTAZIONE */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-200">
@@ -395,7 +416,7 @@ export default function PazientiPage() {
                         <button
                           type="button"
                           onClick={() => apriWhatsApp(p)}
-                          disabled={!p.telefono?.trim() || !haTessera}
+                          disabled={condivisioneInCorso || !p.telefono?.trim() || !haTessera}
                           className="inline-flex min-h-11 items-center gap-1.5 p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold transition border border-emerald-200 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700"
                           title={!p.telefono?.trim() ? "Aggiungi un numero telefonico nella scheda paziente" : !haTessera ? "Numero tessera non ancora assegnato" : "Invia il collegamento alla tessera su WhatsApp"}
                         >
@@ -403,6 +424,7 @@ export default function PazientiPage() {
                           <span>{!p.telefono?.trim() ? "Telefono mancante" : !haTessera ? "Tessera da assegnare" : "Invia tessera WhatsApp"}</span>
                         </button>
 
+                      {haTessera && <button type="button" disabled={condivisioneInCorso} onClick={() => void revocaLink(p.id)} className="min-h-11 rounded-lg border px-3 text-xs font-bold disabled:opacity-50">Revoca link</button>}
                       {haTessera && (
                         <Link
                           href={`/tessera/${p.id}`}
