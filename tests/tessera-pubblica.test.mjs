@@ -13,6 +13,7 @@ function carica(file, imports = {}, globals = {}) {
 }
 const tokens = carica("app/lib/tessera-token.ts");
 const associazione = { urlGestionale: "https://gestionale.romarta.it" };
+const links = carica("app/lib/link-tessera.ts", { "./associazione": { associazione } });
 const whatsapp = carica("app/lib/whatsapp.ts", { "./associazione": { associazione } });
 const post = body => new Request("https://example.test/api/tessera-pubblica", { method: "POST", body: JSON.stringify(body) });
 test("Token: 256 bit casuali, formato URL e hash stabile distinto dal segreto", () => {
@@ -50,7 +51,7 @@ function gestione({ user = true, allowed = true, rpcError = false } = {}) {
   const calls = [];
   let clientOptions, jwtVerificato;
   const client = { auth: { getUser: async (jwt) => { jwtVerificato = jwt; return { data: { user: user ? { id: "operatore" } : null }, error: null }; } }, rpc: async (name, args) => { calls.push([name, args]); return name === "roma_rta_operatore_abilitato" ? { data: allowed, error: null } : { data: "2026-12-01", error: rpcError ? (typeof rpcError === "string" ? { code: rpcError, message: "DETTAGLIO_SQL_RISERVATO" } : {}) : null }; } };
-  return { calls, options: () => clientOptions, jwt: () => jwtVerificato, api: carica("app/api/tessere/condivisione/route.ts", { "@supabase/supabase-js": { createClient: (_url, _key, options) => { clientOptions = options; return client; } }, "@/app/lib/tessera-token": tokens, "@/app/lib/associazione": { associazione } }) };
+  return { calls, options: () => clientOptions, jwt: () => jwtVerificato, api: carica("app/api/tessere/condivisione/route.ts", { "@supabase/supabase-js": { createClient: (_url, _key, options) => { clientOptions = options; return client; } }, "@/app/lib/tessera-token": tokens, "@/app/lib/link-tessera": links }) };
 }
 const gestioneRequest = (azione = "crea", auth = true) => new Request("https://example.test/api/tessere/condivisione", { method: "POST", headers: auth ? { Authorization: "Bearer sessione-test" } : {}, body: JSON.stringify({ pazienteId: "11111111-1111-4111-8111-111111111111", azione }) });
 test("Gestione link: anonimo, sessione invalida e non operatore non emettono link", async () => {
@@ -82,19 +83,21 @@ test("Avviso autista: pulsante assente senza assegnazione o telefono valido", ()
   assert.match(renderToStaticMarkup(React.createElement(Button, { autistaId: "id", telefono: "3331111111" })), /Avvisa autista/);
 });
 
-test("Layout: unica eccezione pubblica esatta; tutte le pagine operative restano nel gate", () => {
+test("Layout: pubblico indipendente da Auth e navigazione, centrale sempre protetta", () => {
   const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server");
-  for (const pathname of ["/tessera-pubblica", "/tessera-pubblica/altro", "/", "/pazienti", "/prenotazioni", "/tessera/id", "/autista", "/autista/dashboard"]) {
-    let montaggi = 0;
-    const Layout = carica("app/layout.tsx", {
-      "next/navigation": { usePathname: () => pathname }, "next/font/google": { Inter: () => ({ className: "font" }) }, "./globals.css": {},
-      "@/components/AccessoCentrale": { __esModule: true, default: () => React.createElement("p", null, "Accesso richiesto"), PulsanteLogout: () => null },
-      "next/link": { __esModule: true, default: () => null },
-    }).default;
-    function Page() { montaggi++; return React.createElement("p", null, "Contenuto"); }
-    renderToStaticMarkup(React.createElement(Layout, null, React.createElement(Page)));
-    assert.equal(montaggi, pathname === "/tessera-pubblica" ? 1 : 0, pathname);
-  }
+  const Root = carica("app/layout.tsx", { "next/font/google": { Inter: () => ({ className: "font" }) }, "./globals.css": {} }).default;
+  const Public = carica("app/tessera-pubblica/layout.tsx").default;
+  const Private = carica("app/(centrale)/layout.tsx", {
+    "next/navigation": { usePathname: () => "/tessera/id" },
+    "@/components/AccessoCentrale": { __esModule: true, default: () => React.createElement("p", null, "Accesso richiesto"), PulsanteLogout: () => null },
+    "next/link": { __esModule: true, default: () => null },
+  }).default;
+  const publicHtml = renderToStaticMarkup(React.createElement(Root, null, React.createElement(Public, null, "Tessera pubblica")));
+  assert.match(publicHtml, /Tessera pubblica/); assert.ok(!/Accesso richiesto|<nav|<header/.test(publicHtml));
+  const privateHtml = renderToStaticMarkup(React.createElement(Root, null, React.createElement(Private, null, "SEGRETO")));
+  assert.match(privateHtml, /Accesso richiesto/); assert.ok(!privateHtml.includes("SEGRETO"));
+  for (const file of ["app/layout.tsx", "app/tessera-pubblica/layout.tsx", "app/tessera-pubblica/page.tsx"]) assert.ok(!/AccessoCentrale|LayoutCentrale|usePathname/.test(fs.readFileSync(file, "utf8")));
+  assert.ok(fs.existsSync("app/(centrale)/tessera/[id]/page.tsx"));
 });
 
 test("RPC gestionali: JWT originale verificato e inoltrato, senza client service", async () => {
@@ -123,7 +126,7 @@ test("Confine pubblico: unica RPC limitata, segreto solo nel modulo server-only"
   const server = fs.readFileSync("app/lib/supabase-server.ts", "utf8");
   assert.ok(server.includes('import "server-only"'));
   assert.ok(!server.includes("headers:"));
-  for (const file of ["app/tessera-pubblica/page.tsx", "app/lib/condivisione-tessera.ts", "app/pazienti/page.tsx"]) assert.ok(!fs.readFileSync(file, "utf8").includes("SERVICE_ROLE"));
+  for (const file of ["app/tessera-pubblica/page.tsx", "app/lib/condivisione-tessera.ts", "app/(centrale)/pazienti/page.tsx"]) assert.ok(!fs.readFileSync(file, "utf8").includes("SERVICE_ROLE"));
 });
 test("SQL proposto: contratto di scadenza annuale e sicurezza, senza eseguire DDL", () => {
   const sql = fs.readFileSync("supabase/migrations/20261109000100_tessera_pubblica.sql", "utf8");
@@ -139,4 +142,61 @@ test("SQL proposto: contratto di scadenza annuale e sicurezza, senza eseguire DD
   assert.equal((sql.match(/COMMIT;/g) || []).length, 1);
   for (const grant of sql.matchAll(/GRANT EXECUTE ON FUNCTION ([^;]+);/g)) assert.ok(!/TO (anon|PUBLIC)/i.test(grant[1]));
   assert.ok(!/CREATE POLICY|ALTER POLICY|ALTER ROLE|ALTER DEFAULT PRIVILEGES|GRANT USAGE ON SCHEMA/i.test(sql));
+});
+
+test("Partenza da Pazienti: API -> link validato -> WhatsApp senza ID o credenziali", async () => {
+  const s = gestione(); let whatsappUrl;
+  const client = carica("app/lib/condivisione-tessera.ts", {
+    "./supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "sessione-test" } }, error: null }) } } },
+    "./link-tessera": links,
+  }, { fetch: (url, options) => s.api.POST(new Request(new URL(url, "https://gestionale.romarta.it"), options)) });
+  const file = "app/(centrale)/pazienti/page.tsx";
+  const root = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let declaration;
+  function visit(node) { if (ts.isVariableDeclaration(node) && node.name.getText(root) === "apriWhatsApp") declaration = "const apriWhatsApp = " + node.initializer.getText(root) + "; apriWhatsApp;"; ts.forEachChild(node, visit); }
+  visit(root); assert.ok(declaration);
+  const send = vm.runInNewContext(ts.transpileModule(declaration, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText, {
+    condivisioneInCorso: false, condividiTessera: client.condividiTessera,
+    associazione: { ...associazione, denominazione: "ROMA R.T.A." },
+    setCondivisioneInCorso: () => {}, setEsitoCondivisione: () => {}, setWhatsappPronto: value => { whatsappUrl = value; },
+    alert: () => assert.fail("Invio inatteso fallito"), encodeURIComponent,
+  });
+  const id = "11111111-1111-4111-8111-111111111111";
+  await send({ id, nome: "Mario", cognome: "Rossi", telefono: "3331111111", numero_tessera: 501 });
+  const message = new URL(whatsappUrl).searchParams.get("text");
+  const link = message.match(/https:\/\/gestionale\.romarta\.it\/[^\s]+/)[0];
+  assert.equal(links.verificaLinkTesseraPubblica(link), link);
+  assert.ok(!message.includes(id)); assert.ok(!message.includes("sessione-test")); assert.ok(!message.includes("/tessera/"));
+});
+
+test("Condivisione: rifiuta URL interni, token mancanti e domini estranei prima di WhatsApp", async () => {
+  for (const link of ["https://gestionale.romarta.it/tessera/id", "https://gestionale.romarta.it/tessera-pubblica", "https://gestionale.romarta.it/tessera-pubblica#id", "https://evil.test/tessera-pubblica#" + "a".repeat(43), "https://gestionale.romarta.it/tessera-pubblica?id=123#" + "a".repeat(43)]) {
+    const client = carica("app/lib/condivisione-tessera.ts", {
+      "./supabase": { supabase: { auth: { getSession: async () => ({ data: { session: { access_token: "test" } }, error: null }) } } }, "./link-tessera": links,
+    }, { fetch: async () => Response.json({ link }) });
+    await assert.rejects(client.condividiTessera("id", "crea"), /pubblico/);
+  }
+});
+
+test("Apertura anonima: token assente/invalido/revocato senza dati, token valido con soli dati tessera", async () => {
+  const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server");
+  for (const scenario of ["assente", "invalido", "revocato", "valido"]) {
+    const values = [], refs = []; let cursor = 0, refCursor = 0, effect, calls = 0;
+    const fakeReact = { ...React,
+      useState: initial => { const i = cursor++; if (!(i in values)) values[i] = initial; return [values[i], v => { values[i] = v; }]; },
+      useRef: initial => { const i = refCursor++; return refs[i] ??= { current: initial }; },
+      useEffect: callback => { effect ??= callback; },
+    };
+    const token = scenario === "assente" ? "" : scenario === "invalido" ? "id-paziente" : "a".repeat(43);
+    const Page = carica("app/tessera-pubblica/page.tsx", { react: fakeReact, "@/app/lib/associazione": { associazione: { ...associazione, denominazione: "ROMA R.T.A." } }, "@/app/lib/link-tessera": links }, {
+      AbortController, window: { location: { hash: "#" + token, pathname: "/tessera-pubblica" }, history: { replaceState: () => {} } },
+      fetch: async (url, options) => { calls++; assert.equal(url, "/api/tessera-pubblica"); assert.ok(!options.headers.Authorization);
+        return scenario === "revocato" ? Response.json({ errore: "Collegamento non disponibile o scaduto." }, { status: 404 }) : Response.json({ tessera: { nome: "Mario", cognome: "Rossi", numero: "501", anno: 2026, emissione: null, scadenza: "2026-12-31" } }); },
+    }).default;
+    Page(); effect(); await new Promise(resolve => setTimeout(resolve, 0)); cursor = 0; refCursor = 0;
+    const html = renderToStaticMarkup(Page());
+    assert.equal(calls, ["assente", "invalido"].includes(scenario) ? 0 : 1);
+    assert.equal(html.includes("Mario"), scenario === "valido");
+    assert.ok(!/<nav|Accedi alla centrale|Centrale operativa|Codice fiscale|Data di nascita/.test(html));
+  }
 });

@@ -121,7 +121,7 @@ test("Auth: controllo periodico preserva il modulo, revoca e cambio account lo c
 test("Auth: pagina operativa non montata senza autorizzazione; area autista sempre sospesa", () => {
   const React = require("react");
   const { renderToStaticMarkup } = require("react-dom/server");
-  const HomePage = carica("app/page.tsx", {
+  const HomePage = carica("app/(centrale)/page.tsx", {
     "next/link": { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) },
   }).default;
   for (const stato of ["verifica", "anonimo", "negato", "errore", "autorizzato"]) {
@@ -133,7 +133,7 @@ test("Auth: pagina operativa non montata senza autorizzazione; area autista semp
         "next/link": { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) },
         "@/app/lib/supabase": { supabase: {} },
         "@/app/lib/accesso-centrale": { creaAccessoCentrale },
-        "@/app/autista/page": { __esModule: true, default: () => React.createElement("p", null, "PIN sospeso") },
+        "@/app/(centrale)/autista/page": { __esModule: true, default: () => React.createElement("p", null, "PIN sospeso") },
       }).default;
       function Operativa() { montaggi++; return React.createElement(HomePage); }
       const html = renderToStaticMarkup(React.createElement(Gate, null, React.createElement(Operativa)));

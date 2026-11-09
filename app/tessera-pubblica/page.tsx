@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { associazione } from "@/app/lib/associazione";
+import { tokenPubblicoValido } from "@/app/lib/link-tessera";
 type Tessera = { nome: string; cognome: string; numero: string; anno: number; emissione: string | null; scadenza: string };
 export default function TesseraPubblica() {
   const token = useRef<string | null>(null);
@@ -17,6 +18,7 @@ export default function TesseraPubblica() {
     setLoading(true); setTessera(null); setErrore("");
     void (async () => {
       try {
+        if (!tokenPubblicoValido(token.current)) throw new Error("Collegamento non disponibile o scaduto. Contatta la centrale.");
         const response = await fetch("/api/tessera-pubblica", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: token.current }), cache: "no-store", signal: controller.signal });
         const data = await response.json();
         if (!response.ok) throw new Error(data.errore || "Collegamento non disponibile o scaduto.");

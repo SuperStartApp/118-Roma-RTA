@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { Loader2, LogOut, ShieldCheck } from "lucide-react";
 import { supabase } from "@/app/lib/supabase";
 import { creaAccessoCentrale, type StatoAccesso } from "@/app/lib/accesso-centrale";
-import AutistaLogin from "@/app/autista/page";
+import AutistaLogin from "@/app/(centrale)/autista/page";
 
 type Accesso = StatoAccesso & {
   accedi: (email: string, password: string) => Promise<void>;

@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { hashToken, nuovoToken } from "@/app/lib/tessera-token";
-import { associazione } from "@/app/lib/associazione";
+import { creaLinkTesseraPubblica } from "@/app/lib/link-tessera";
 const headers = { "Cache-Control": "no-store, private" };
 const risposta = (body: object, status: number) => Response.json(body, { status, headers });
 function erroreRpc(error: { code?: string }) {
@@ -35,6 +35,6 @@ export async function POST(request: Request) {
     const { data, error } = await client.rpc("roma_rta_condividi_tessera", { p_paziente: body.pazienteId, p_hash: hashToken(token) });
     if (error) return erroreRpc(error);
     if (!data) return risposta({ errore: "Link non creato: verifica tessera, anno e configurazione SQL." }, 503);
-    return risposta({ link: new URL("/tessera-pubblica#" + token, associazione.urlGestionale).href, scadenza: data }, 200);
+    return risposta({ link: creaLinkTesseraPubblica(token), scadenza: data }, 200);
   } catch { return risposta({ errore: "Operazione non riuscita. Riprova." }, 503); }
 }

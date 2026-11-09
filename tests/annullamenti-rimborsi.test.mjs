@@ -160,10 +160,10 @@ test("7. agenda e dashboard autista escludono le corse annullate", async () => {
   const other = prenotazione({ id: "altra", autista_id: "altro-autista" });
   const db = database([active, cancelled, other]);
   let agendaRows, driverRows;
-  await functionFromPage("app/agenda/page.tsx", "fetchCorseOggi", {
+  await functionFromPage("app/(centrale)/agenda/page.tsx", "fetchCorseOggi", {
     supabase: db.client, setLoading: () => {}, setCorse: (rows) => { agendaRows = rows; },
   })("2026-11-08");
-  await functionFromPage("app/autista/dashboard/page.tsx", "fetchMieCorse", {
+  await functionFromPage("app/(centrale)/autista/dashboard/page.tsx", "fetchMieCorse", {
     supabase: db.client, setLoading: () => {}, setError: () => {}, setCorse: (rows) => { driverRows = rows; },
   })("autista-demo");
   assert.deepEqual(agendaRows.map((p) => p.id).sort(), ["altra", "corsa-demo"]);
@@ -202,7 +202,7 @@ test("conferma esplicita rifiutata: nessuna richiesta di modifica", async () => 
   const db = database([p]);
   let message;
   const lock = { current: false };
-  const confirm = functionFromPage("app/prenotazioni/page.tsx", "confermaOperazione", {
+  const confirm = functionFromPage("app/(centrale)/prenotazioni/page.tsx", "confermaOperazione", {
     operationLock: lock, supabase: db.client, ...operazioni, ...stato,
     window: { confirm: (text) => { message = text; return false; } },
     setProcessingId: () => {}, setEsito: () => {},
@@ -221,7 +221,7 @@ test("nessuna riga restituita o errore RLS/rete: nessun aggiornamento ottimistic
     const p = prenotazione();
     const db = database([p], options);
     let esito;
-    const confirm = functionFromPage("app/prenotazioni/page.tsx", "confermaOperazione", {
+    const confirm = functionFromPage("app/(centrale)/prenotazioni/page.tsx", "confermaOperazione", {
       operationLock: { current: false }, supabase: db.client, ...operazioni, ...stato,
       window: { confirm: () => true }, setProcessingId: () => {}, setEsito: (value) => { esito = value; },
       setPrenotazioni: () => { throw new Error("Aggiornamento ottimistico vietato"); },
@@ -264,7 +264,7 @@ test("Excel conserva annullamenti, date e riepilogo separato senza salvare file 
     },
     writeFile: (book) => { saved = book; },
   };
-  functionFromPage("app/report/page.tsx", "exportToExcel", {
+  functionFromPage("app/(centrale)/report/page.tsx", "exportToExcel", {
     data, indicatori: [{ label: "Saldo netto", value: 0 }], XLSX, ...stato,
   })();
   const row = saved["Rendiconto Servizi"][0];
@@ -286,7 +286,7 @@ test("PDF generale e ricevuta espongono rimborso e incasso originale, solo in me
     doc.save = () => doc;
     return doc;
   }
-  functionFromPage("app/report/page.tsx", "exportAllToPDF", {
+  functionFromPage("app/(centrale)/report/page.tsx", "exportAllToPDF", {
     data: [p], startDate: "", endDate: "", indicatori: [{ label: "Saldo netto", value: 0 }],
     jsPDF: Pdf, ...stato, autoTable: (pdf, options) => { table = options; autoTable(pdf, options); },
   })();
@@ -294,7 +294,7 @@ test("PDF generale e ricevuta espongono rimborso e incasso originale, solo in me
   assert.ok(doc.output("arraybuffer").byteLength > 1000);
   assert.equal(doc.getNumberOfPages(), 1);
   const { associazione } = load("app/lib/associazione.ts");
-  functionFromPage("app/report/page.tsx", "exportSinglePDF", { jsPDF: Pdf, associazione, ...stato })(p);
+  functionFromPage("app/(centrale)/report/page.tsx", "exportSinglePDF", { jsPDF: Pdf, associazione, ...stato })(p);
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Incasso originale: RICEVUTO")));
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Rimborso integrale:")));
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Denaro restituito il:")));
@@ -308,7 +308,7 @@ test("conteggio paziente distingue prenotazioni totali e annullate", async () =>
     prenotazione({ id: "c", paziente_id: "paziente-demo", annullata_il: "2026-11-08T10:00:00Z" }),
   ]);
   let patients;
-  await functionFromPage("app/pazienti/page.tsx", "fetchPazientiEStorico", {
+  await functionFromPage("app/(centrale)/pazienti/page.tsx", "fetchPazientiEStorico", {
     supabase: db.client, setLoading: () => {}, setPazienti: (rows) => { patients = rows; },
     caricaPazienti: async () => ({ data: [{ id: "paziente-demo", nome: "Mario", cognome: "Rossi" }], error: null }),
   })();
@@ -321,7 +321,7 @@ test("interfaccia aggiornata solo dopo il risultato positivo, senza rimuovere la
   const p = prenotazione();
   const db = database([p]);
   let displayed = [p], esito;
-  const confirm = functionFromPage("app/prenotazioni/page.tsx", "confermaOperazione", {
+  const confirm = functionFromPage("app/(centrale)/prenotazioni/page.tsx", "confermaOperazione", {
     operationLock: { current: false }, supabase: db.client, ...operazioni, ...stato,
     window: { confirm: () => true }, setProcessingId: () => {}, setEsito: (value) => { esito = value; },
     setPrenotazioni: (callback) => { displayed = callback(displayed); },
@@ -339,7 +339,7 @@ test("una corsa annullata non può più registrare orari dal pannello autista", 
   const p = prenotazione({ annullata_il: "2026-11-08T10:00:00Z" });
   const db = database([p]);
   let error;
-  await functionFromPage("app/autista/dashboard/page.tsx", "registraOra", {
+  await functionFromPage("app/(centrale)/autista/dashboard/page.tsx", "registraOra", {
     supabase: db.client, localStorage: { getItem: () => "autista-demo" }, setActionLoading: () => {},
     alert: (message) => { error = message; },
     fetchMieCorse: () => { throw new Error("Aggiornamento non confermato"); },
