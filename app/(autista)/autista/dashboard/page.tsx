@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { supabase } from "@/app/lib/supabase";
-import { condividiTessera } from "@/app/lib/condivisione-tessera";
+
+
 import { associazione } from "@/app/lib/associazione";
 import { useRouter } from "next/navigation";
 import { 
@@ -42,99 +42,27 @@ export default function AutistaDashboard() {
   const router = useRouter();
 
   useEffect(() => {
-    // Calcoliamo la data odierna sul client
-    const d = new Date();
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    setToday(`${year}-${month}-${day}`);
-
-    const autistaId = localStorage.getItem("autista_id");
-    const nome = localStorage.getItem("autista_nome");
-
-    if (!autistaId) {
-      router.push("/autista");
-      return;
-    }
-
-    setNomeAutista(nome || "Operatore");
-    fetchDatiAutista(autistaId);
-    fetchMieCorse(autistaId);
-  }, [router]);
-
-  async function fetchDatiAutista(id: string) {
-    setErroreTesseraAutista(null);
-    try {
-      const { data, error: metadataError } = await supabase
-        .from("autisti")
-        .select("numero_tessera, anno_tessera")
-        .eq("id", id)
-        .single();
-
-      if (metadataError) throw metadataError;
-      if (data?.numero_tessera) {
-        setTesseraAutista(`${data.numero_tessera}/${data.anno_tessera || ""}`);
-      }
-    } catch {
-      setErroreTesseraAutista("Dati della tessera autista non disponibili.");
-    }
+    const d=new Date();setToday(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
+    void carica();
+  }, []);
+  async function carica(){
+    setLoading(true);try{
+      const [me,corseR]=await Promise.all([fetch("/api/autista/me",{cache:"no-store"}),fetch("/api/autista/corse",{cache:"no-store"})]);
+      if(me.status===401||corseR.status===401){router.replace("/autista");return;}
+      if(!me.ok||!corseR.ok)throw new Error("Impossibile caricare i dati del turno");
+      const m=await me.json();const c=await corseR.json();
+      setNomeAutista(`${m.autista.nome} ${m.autista.cognome||""}`.trim());
+      setTesseraAutista(m.autista.numero_tessera?`${m.autista.numero_tessera}/${m.autista.anno_tessera||""}`:null);
+      setCorse(c.corse||[]);setError(null);
+    }catch(e){setError(e instanceof Error?e.message:"Errore di connessione");}finally{setLoading(false);}
   }
-
-  async function fetchMieCorse(id: string) {
-    try {
-      setLoading(true);
-      const { data, error: dbError } = await supabase
-        .from("prenotazioni")
-        .select(`*, pazienti(*)`)
-        .eq("autista_id", id)
-        .is("annullata_il", null)
-        .order("data_appuntamento", { ascending: true })
-        .order("ora_appuntamento", { ascending: true });
-
-      if (dbError) throw dbError;
-      setCorse(data || []);
-      setError(null);
-    } catch (err: any) {
-      console.error("Errore fetch corse autista:", err);
-      setError(err?.message || "Errore nel caricamento delle corse assegnate.");
-    } finally {
-      setLoading(false);
-    }
+  async function registraOra(id:string,tipo:"inizio"|"fine"){
+    setActionLoading(id);try{
+      const r=await fetch("/api/autista/registra-ora",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,tipo})});
+      const j=await r.json();if(!r.ok)throw new Error(j.errore||"Operazione non riuscita");await carica();
+    }catch(e){alert("Errore registrazione: "+(e instanceof Error?e.message:"Riprova"));}finally{setActionLoading(null);}
   }
-
-  async function registraOra(id: string, tipo: "inizio" | "fine") {
-    setActionLoading(id);
-    const oraAttuale = new Date().toISOString();
-    const colonna = tipo === "inizio" ? "ora_inizio_effettiva" : "ora_fine_effettiva";
-
-    try {
-      const autistaId = localStorage.getItem("autista_id");
-      if (!autistaId) throw new Error("Accesso autista non disponibile. Rientra con il PIN.");
-      const { data, error: dbError } = await supabase
-        .from("prenotazioni")
-        .update({ [colonna]: oraAttuale })
-        .eq("id", id)
-        .eq("autista_id", autistaId)
-        .is("annullata_il", null)
-        .select("id").maybeSingle();
-
-      if (dbError) throw dbError;
-      if (!data) throw new Error("La corsa non è più eseguibile o assegnata a te. Aggiorna l’elenco.");
-
-      await fetchMieCorse(autistaId);
-    } catch (err: any) {
-      alert("Errore registrazione: " + (err?.message || "Riprova tra poco"));
-    } finally {
-      setActionLoading(null);
-    }
-  }
-
-  function logout() {
-    if (confirm("Sei sicuro di voler effettuare il logout dal turno?")) {
-      localStorage.clear();
-      router.push("/autista");
-    }
-  }
+  async function logout(){if(!confirm("Vuoi uscire dal turno?"))return;await fetch("/api/autista/logout",{method:"POST"});router.replace("/autista");router.refresh();}
 
   const apriNavigatore = (via?: string, civico?: string, citta?: string) => {
     if (!via && !citta) return;
@@ -154,70 +82,7 @@ export default function AutistaDashboard() {
     window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 
-  // 2. INVIA TESSERA SOCIO SOSTENITORE (GENERA SE MANCA E MANDA LINK UFFICIALE)
-  const inviaTesseraWhatsApp = async (corsa: any) => {
-    if (!corsa?.pazienti?.telefono) {
-      alert("Nessun recapito telefonico registrato per questo paziente.");
-      return;
-    }
-
-    let numTessera = corsa.pazienti.numero_tessera;
-    const annoTessera = corsa.pazienti.anno_tessera || new Date().getFullYear();
-
-    // Se il paziente non ha ancora una tessera, la generiamo all'istante
-    if (!numTessera) {
-      try {
-        const { data: prossimoNum, error: rpcErr } = await supabase.rpc("genera_prossima_tessera", {
-          tabella: "pazienti",
-          offset_iniziale: 500
-        });
-
-        if (rpcErr) throw rpcErr;
-
-        const { data: emessa, error: emissioneError } = await supabase
-          .from("pazienti")
-          .update({
-            numero_tessera: prossimoNum,
-            anno_tessera: annoTessera,
-            data_tesseramento: new Date().toISOString().split("T")[0]
-          })
-          .eq("id", corsa.pazienti.id)
-          .is("numero_tessera", null)
-          .select("id, numero_tessera, anno_tessera, data_tesseramento")
-          .maybeSingle();
-
-        if (emissioneError) throw emissioneError;
-        if (!emessa || emessa.numero_tessera !== prossimoNum) throw new Error("Emissione non confermata. Aggiorna l’elenco prima di riprovare.");
-        numTessera = emessa.numero_tessera;
-        setCorse((prev) => prev.map((item) => item.pazienti?.id === emessa.id
-          ? { ...item, pazienti: { ...item.pazienti, ...emessa } } : item));
-      } catch (e: any) {
-        console.error("Errore generazione tessera:", e);
-        alert("Tessera non emessa: verifica connessione e permessi, poi aggiorna l’elenco. Nessun messaggio WhatsApp è stato preparato.");
-        return;
-      }
-    }
-
-    const cleanPhone = corsa.pazienti.telefono.replace(/\D/g, "");
-    const numero = cleanPhone.startsWith("39") ? cleanPhone : `39${cleanPhone}`;
-    let linkTessera: string;
-    try {
-      const risultato = await condividiTessera(corsa.pazienti.id, "crea");
-      if (!risultato.link) throw new Error("Link non creato.");
-      linkTessera = risultato.link;
-    } catch { alert("Link non creato. Contatta la centrale."); return; }
-
-    const msg = 
-      `🚑 *TESSERA SOCIO SOSTENITORE*\n\n` +
-      `Gentile *${corsa.pazienti.nome} ${corsa.pazienti.cognome}*,\n` +
-      `ecco la Sua tessera annuale ufficiale:\n\n` +
-      `💳 *Tessera N°:* #${numTessera || "In emissione"}/${annoTessera}\n` +
-      `📅 *Validità:* fino al 31/12/${annoTessera}\n\n` +
-      `👉 *Apri, salva o stampa la tua tessera digitale:*\n${linkTessera}\n\n` +
-      `Grazie di cuore per il vostro prezioso sostegno!`;
-
-    window.open(`https://wa.me/${numero}?text=${encodeURIComponent(msg)}`, "_blank");
-  };
+  // Emissione e condivisione tessera sospese finché non è disponibile una API dedicata autorizzata.
 
   // DIVISIONE IN CATEGORIE (OGGI, FUTURE, STORICO)
   const corseOggi = today ? corse.filter(c => c.data_appuntamento === today && !c.ora_fine_effettiva) : [];
@@ -253,11 +118,7 @@ export default function AutistaDashboard() {
         </div>
         <div className="flex gap-2">
           <button
-            onClick={() => {
-              const id = localStorage.getItem("autista_id");
-              if (id) fetchMieCorse(id);
-              else router.push("/autista");
-            }}
+            onClick={() => void carica()}
             className="bg-slate-900 text-white px-5 py-2.5 rounded-xl font-medium text-sm hover:bg-slate-800 transition"
           >
             Ricarica Dati
@@ -312,7 +173,7 @@ export default function AutistaDashboard() {
 
       {/* CONTENUTO DASHBOARD */}
       <main className="max-w-2xl mx-auto p-4 space-y-4">
-        {erroreTesseraAutista && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{erroreTesseraAutista} <button type="button" className="font-semibold underline" onClick={() => { const id = localStorage.getItem("autista_id"); if (id) void fetchDatiAutista(id); }}>Riprova</button></div>}
+        {erroreTesseraAutista && <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">{erroreTesseraAutista} <button type="button" className="font-semibold underline" onClick={() => void carica()}>Riprova</button></div>}
         
         {/* SELEZIONE TABS (OGGI / FUTURE / STORICO) */}
         <div className="bg-white p-1 rounded-2xl border border-slate-200 shadow-sm grid grid-cols-3 gap-1">
@@ -572,11 +433,11 @@ export default function AutistaDashboard() {
 
                       {/* PULSANTE TESSERA SOCIO SOSTENITORE */}
                       <button
-                        onClick={() => inviaTesseraWhatsApp(corsa)}
+                        disabled
                         className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white font-bold text-xs shadow-sm transition active:scale-[0.98]"
                       >
                         <ShieldCheck size={16} /> 
-                        <span>Invia Tessera Socio al Paziente</span>
+                        <span>Emissione tessera: contatta la centrale</span>
                       </button>
                     </div>
                   )}
