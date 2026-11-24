@@ -14,7 +14,8 @@ function carica(file, imports = {}, globals = {}) {
 const ids = carica("app/lib/id-paziente.ts");
 const uuidDemo = "11111111-1111-4111-8111-111111111111";
 const datiAssociazione = carica("app/lib/associazione.ts").associazione;
-const documento = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione } });
+const numerazione = carica("app/lib/formatta-numero.ts");
+const documento = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione }, "@/app/lib/formatta-numero": numerazione });
 const tokens = carica("app/lib/tessera-token.ts");
 const associazione = { urlGestionale: "https://gestionale.romarta.it" };
 const links = carica("app/lib/link-tessera.ts", { "./associazione": { associazione } });
@@ -75,11 +76,23 @@ test("Gestione link: crea URL personale, DB riceve solo hash, revoca e falliment
 });
 test("Avviso autista: numero valido, link corretto e messaggio generico senza PIN o paziente", () => {
   for (const number of [null, "", "123", "333abc1111111", "+00000000", "++393331111111", "39+3331111111"]) assert.equal(whatsapp.avvisoAutistaUrl(number), null);
-  for (const number of ["333 111 1111", "+39 333 111 1111", "0039 3331111111"]) {
+  for (const number of ["333 111 1111", "+39 333 111 1111", "0039 3331111111", "393331111111"]) {
     const url = new URL(whatsapp.avvisoAutistaUrl(number));
-    assert.equal(url.hostname, "web.whatsapp.com"); assert.equal(url.searchParams.get("phone"), "393331111111");
-    const text = url.searchParams.get("text"); assert.ok(text.includes("https://gestionale.romarta.it/autista")); assert.match(text, /sospeso/); assert.ok(!/PIN|paziente|Mario|Rossi|indirizzo|patologia/i.test(text));
+    assert.equal(url.origin, "https://wa.me"); assert.equal(url.pathname, "/393331111111");
+    assert.match(url.search, /^\?text=ROMA%20R\.T\.A\./);
+    const text = url.searchParams.get("text"); assert.ok(text.includes("https://gestionale.romarta.it/autista")); assert.ok(!/PIN|paziente|Mario|Rossi|indirizzo|patologia/i.test(text));
   }
+});
+test("Avviso autista: ogni assegnato ha un link con nome e numero propri", () => {
+  const React = require("react");
+  const { renderToStaticMarkup } = require("react-dom/server");
+  const Button = carica("components/AvvisaAutista.tsx", { "@/app/lib/whatsapp": whatsapp }).default;
+  const links = renderToStaticMarkup(React.createElement(React.Fragment, null,
+    React.createElement(Button, { autistaId: "a", nome: "Autista Uno", telefono: "333 111 1111" }),
+    React.createElement(Button, { autistaId: "b", nome: "Autista Due", telefono: "+39 333 222 2222" }),
+  ));
+  assert.match(links, /href="https:\/\/wa\.me\/393331111111\?text=[^"]+"[^>]*>Avvisa Autista Uno<\/a>/);
+  assert.match(links, /href="https:\/\/wa\.me\/393332222222\?text=[^"]+"[^>]*>Avvisa Autista Due<\/a>/);
 });
 test("Avviso autista: pulsante assente senza assegnazione o telefono valido", () => {
   const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server");
@@ -322,7 +335,7 @@ test("Grafica condivisa: loghi locali, istituzione e campi tessera senza anagraf
 });
 test("Documento condiviso: stampa invoca il browser senza API o token", () => {
   let printed = 0;
-  const Component = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione } }, { window: { print: () => { printed++; } } }).default;
+  const Component = carica("components/TesseraAssociativa.tsx", { "@/app/lib/associazione": { associazione: datiAssociazione }, "@/app/lib/formatta-numero": numerazione }, { window: { print: () => { printed++; } } }).default;
   const tree = Component({ variante: "pubblica", dati: { nome: "Mario", cognome: "Rossi", numero: "8", anno: 2026, emissione: null, scadenza: "2026-12-31" } });
   const React = require("react"); let button;
   function visit(node) { if (!node || typeof node !== "object") return; if (node.type === "button") button = node; React.Children.forEach(node.props?.children, visit); }

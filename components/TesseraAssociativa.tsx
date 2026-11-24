@@ -1,5 +1,7 @@
 "use client";
 
+import { formattaNumero } from "@/app/lib/formatta-numero";
+
 import { Printer } from "lucide-react";
 import { associazione } from "@/app/lib/associazione";
 
@@ -47,7 +49,7 @@ export default function TesseraAssociativa(props: Props) {
         <section aria-labelledby="socio-titolo" className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs font-bold uppercase tracking-wider text-blue-900">Socio sostenitore</p>
-            <p className="rounded-lg bg-blue-900 px-3 py-2 text-sm font-bold text-white">Tessera N&deg; {dati.numero ?? "Non disponibile"}</p>
+            <p className="rounded-lg bg-blue-900 px-3 py-2 text-sm font-bold text-white">Tessera N&deg; {formattaNumero(dati.numero, "Non disponibile")}</p>
           </div>
           <h2 id="socio-titolo" className="mt-5 break-words text-2xl font-bold uppercase leading-snug text-blue-950 sm:text-3xl">{dati.nome} {dati.cognome}</h2>
           <dl className="mt-5 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">

@@ -118,14 +118,14 @@ test("Auth: controllo periodico preserva il modulo, revoca e cambio account lo c
   assert.equal(s.stati.at(-1).stato, "negato");
 });
 
-test("Auth: pagina operativa non montata senza autorizzazione; area autista sempre sospesa", () => {
+test("Auth: pagina operativa non montata senza autorizzazione", () => {
   const React = require("react");
   const { renderToStaticMarkup } = require("react-dom/server");
   const HomePage = carica("app/(centrale)/page.tsx", {
     "next/link": { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) },
   }).default;
   for (const stato of ["verifica", "anonimo", "negato", "errore", "autorizzato"]) {
-    for (const pathname of ["/", "/pazienti", "/prenotazione", "/prenotazioni/id", "/report", "/agenda", "/tessera/id", "/autisti", "/autista", "/autista/dashboard"]) {
+    for (const pathname of ["/", "/pazienti", "/prenotazione", "/prenotazioni/id", "/report", "/agenda", "/tessera/id", "/autisti", "/ricevute"]) {
       let montaggi = 0;
       const Gate = carica("components/AccessoCentrale.tsx", {
         react: { ...React, useState: (iniziale) => React.useState(iniziale?.stato ? { stato, messaggio: "Messaggio simulato" } : iniziale) },
@@ -133,16 +133,14 @@ test("Auth: pagina operativa non montata senza autorizzazione; area autista semp
         "next/link": { __esModule: true, default: ({ href, children, ...props }) => React.createElement("a", { href, ...props }, children) },
         "@/app/lib/supabase": { supabase: {} },
         "@/app/lib/accesso-centrale": { creaAccessoCentrale },
-        "@/app/(centrale)/autista/page": { __esModule: true, default: () => React.createElement("p", null, "PIN sospeso") },
+        "@/app/(autista)/autista/page": { __esModule: true, default: () => null },
       }).default;
       function Operativa() { montaggi++; return React.createElement(HomePage); }
       const html = renderToStaticMarkup(React.createElement(Gate, null, React.createElement(Operativa)));
-      const driver = pathname === "/autista" || pathname.startsWith("/autista/");
-      assert.equal(montaggi, stato === "autorizzato" && !driver ? 1 : 0, `${stato} ${pathname}`);
-      assert.equal(html.includes("Nuovo trasporto"), stato === "autorizzato" && !driver);
+      assert.equal(montaggi, stato === "autorizzato" ? 1 : 0, `${stato} ${pathname}`);
+      assert.equal(html.includes("Nuovo trasporto"), stato === "autorizzato");
       assert.ok(!html.includes("PIN master"));
       assert.ok(!html.includes("Sblocca Centrale"));
-      if (driver) assert.ok(html.includes("PIN sospeso"));
     }
   }
 });

@@ -1,5 +1,7 @@
 "use client";
 
+import { formattaNumero } from "@/app/lib/formatta-numero";
+
 import React, { useEffect, useState } from "react";
 
 
@@ -44,9 +46,14 @@ export default function AutistaDashboard() {
   useEffect(() => {
     const d=new Date();setToday(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`);
     void carica();
+    const aggiorna = () => { if (document.visibilityState === "visible") void carica(false); };
+    const timer = window.setInterval(aggiorna, 30000);
+    document.addEventListener("visibilitychange", aggiorna);
+    return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", aggiorna); };
   }, []);
-  async function carica(){
-    setLoading(true);try{
+  async function carica(mostraCaricamento = true){
+    if (mostraCaricamento) setLoading(true);
+    try{
       const [me,corseR]=await Promise.all([fetch("/api/autista/me",{cache:"no-store"}),fetch("/api/autista/corse",{cache:"no-store"})]);
       if(me.status===401||corseR.status===401){router.replace("/autista");return;}
       if(!me.ok||!corseR.ok)throw new Error("Impossibile caricare i dati del turno");
@@ -60,7 +67,7 @@ export default function AutistaDashboard() {
     setActionLoading(id);try{
       const r=await fetch("/api/autista/registra-ora",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({id,tipo})});
       const j=await r.json();if(!r.ok)throw new Error(j.errore||"Operazione non riuscita");await carica();
-    }catch(e){alert("Errore registrazione: "+(e instanceof Error?e.message:"Riprova"));}finally{setActionLoading(null);}
+    }catch(e){await carica();alert("Errore registrazione: "+(e instanceof Error?e.message:"Riprova"));}finally{setActionLoading(null);}
   }
   async function logout(){if(!confirm("Vuoi uscire dal turno?"))return;await fetch("/api/autista/logout",{method:"POST"});router.replace("/autista");router.refresh();}
 
@@ -306,7 +313,7 @@ export default function AutistaDashboard() {
                       {haTessera && (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-md mt-1">
                           <ShieldCheck size={11} className="text-amber-600" />
-                          SOCIO N° #{corsa.pazienti.numero_tessera}/{corsa.pazienti.anno_tessera || ""}
+                          SOCIO N° #{formattaNumero(corsa.pazienti.numero_tessera)}/{corsa.pazienti.anno_tessera || ""}
                         </span>
                       )}
                     </div>

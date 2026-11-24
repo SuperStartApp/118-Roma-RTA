@@ -78,7 +78,7 @@ function functionFromPage(file, name, context) {
   const source = ts.createSourceFile(file, fs.readFileSync(file, "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let declaration;
   function visit(node) {
-    if (ts.isFunctionDeclaration(node) && node.name?.text === name) declaration = node.getText(source);
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) declaration = node.getText(source).replace(/^export /, "");
     if (ts.isVariableDeclaration(node) && node.name.getText(source) === name && node.initializer) {
       declaration = `const ${name} = ${node.initializer.getText(source)};`;
     }
@@ -159,15 +159,23 @@ test("7. agenda e dashboard autista escludono le corse annullate", async () => {
   const cancelled = prenotazione({ id: "annullata", annullata_il: "2026-11-08T10:00:00Z" });
   const other = prenotazione({ id: "altra", autista_id: "altro-autista" });
   const db = database([active, cancelled, other]);
-  let agendaRows, driverRows;
+  let agendaRows;
   await functionFromPage("app/(centrale)/agenda/page.tsx", "fetchCorseOggi", {
     supabase: db.client, setLoading: () => {}, setCorse: (rows) => { agendaRows = rows; },
   })("2026-11-08");
-  await functionFromPage("app/(centrale)/autista/dashboard/page.tsx", "fetchMieCorse", {
-    supabase: db.client, setLoading: () => {}, setError: () => {}, setCorse: (rows) => { driverRows = rows; },
-  })("autista-demo");
   assert.deepEqual(agendaRows.map((p) => p.id).sort(), ["altra", "corsa-demo"]);
-  assert.deepEqual(driverRows.map((p) => p.id), ["corsa-demo"]);
+  const filtri = [];
+  const query = { select: () => query, order: () => query,
+    eq: (...args) => { filtri.push(args); return query; },
+    is: (...args) => { filtri.push(args); return query; },
+    limit: async () => ({ data: [active] }),
+  };
+  const risposta = await functionFromPage("app/api/autista/corse/route.ts", "GET", {
+    sessioneAutista: async () => ({ autista_id: "autista-demo" }), noStore: {}, Response,
+    createSupabaseServerClient: () => ({ from: () => query }),
+  })();
+  assert.equal(risposta.status, 200);
+  assert.deepEqual(filtri, [["assegnazioni.autista_id", "autista-demo"], ["annullata_il", null]]);
   assert.equal(db.writes.length, 0);
 });
 
@@ -253,6 +261,8 @@ test("concorrenza tra pagamento e annullamento: la richiesta obsoleta non modifi
   }
 });
 
+const nomiEquipaggio = functionFromPage("app/(centrale)/report/page.tsx", "nomiEquipaggio");
+
 test("Excel conserva annullamenti, date e riepilogo separato senza salvare file reali", () => {
   const data = [prenotazione({ pagato: true, annullata_il: "2026-11-08T10:00:00Z", rimborso_effettuato_il: "2026-11-08T11:00:00Z" })];
   let saved;
@@ -265,7 +275,7 @@ test("Excel conserva annullamenti, date e riepilogo separato senza salvare file 
     writeFile: (book) => { saved = book; },
   };
   functionFromPage("app/(centrale)/report/page.tsx", "exportToExcel", {
-    data, indicatori: [{ label: "Saldo netto", value: 0 }], XLSX, ...stato,
+    data, indicatori: [{ label: "Saldo netto", value: 0 }], XLSX, nomiEquipaggio, ...stato,
   })();
   const row = saved["Rendiconto Servizi"][0];
   assert.equal(row.Stato_Prenotazione, "Annullata — Rimborsata");
@@ -275,7 +285,7 @@ test("Excel conserva annullamenti, date e riepilogo separato senza salvare file 
   assert.equal(saved["Riepilogo economico"][0].Euro, 0);
 });
 
-test("PDF generale e ricevuta espongono rimborso e incasso originale, solo in memoria", () => {
+test("PDF generale e scheda trasporto espongono rimborso e incasso originale, solo in memoria", () => {
   const p = prenotazione({ pagato: true, annullata_il: "2026-11-08T10:00:00Z", rimborso_effettuato_il: "2026-11-08T11:00:00Z" });
   let doc, table;
   const lines = [];
@@ -288,13 +298,13 @@ test("PDF generale e ricevuta espongono rimborso e incasso originale, solo in me
   }
   functionFromPage("app/(centrale)/report/page.tsx", "exportAllToPDF", {
     data: [p], startDate: "", endDate: "", indicatori: [{ label: "Saldo netto", value: 0 }],
-    jsPDF: Pdf, ...stato, autoTable: (pdf, options) => { table = options; autoTable(pdf, options); },
+    jsPDF: Pdf, nomiEquipaggio, ...stato, autoTable: (pdf, options) => { table = options; autoTable(pdf, options); },
   })();
   assert.ok(table.body[0].includes("Annullata — Rimborsata"));
   assert.ok(doc.output("arraybuffer").byteLength > 1000);
   assert.equal(doc.getNumberOfPages(), 1);
   const { associazione } = load("app/lib/associazione.ts");
-  functionFromPage("app/(centrale)/report/page.tsx", "exportSinglePDF", { jsPDF: Pdf, associazione, ...stato })(p);
+  functionFromPage("app/(centrale)/report/page.tsx", "exportSinglePDF", { jsPDF: Pdf, associazione, nomiEquipaggio, ...stato })(p);
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Incasso originale: RICEVUTO")));
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Rimborso integrale:")));
   assert.ok(lines.some((line) => typeof line === "string" && line.includes("Denaro restituito il:")));
@@ -335,15 +345,18 @@ test("interfaccia aggiornata solo dopo il risultato positivo, senza rimuovere la
   assert.equal(esito.type, "success");
 });
 
-test("una corsa annullata non può più registrare orari dal pannello autista", async () => {
-  const p = prenotazione({ annullata_il: "2026-11-08T10:00:00Z" });
-  const db = database([p]);
-  let error;
-  await functionFromPage("app/(centrale)/autista/dashboard/page.tsx", "registraOra", {
-    supabase: db.client, localStorage: { getItem: () => "autista-demo" }, setActionLoading: () => {},
-    alert: (message) => { error = message; },
-    fetchMieCorse: () => { throw new Error("Aggiornamento non confermato"); },
-  })(p.id, "inizio");
-  assert.equal(db.writes.length, 0);
-  assert.ok(error);
+test("la API autista rispetta il rifiuto della marcatura dal database", async () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const marca = functionFromPage("app/api/autista/registra-ora/route.ts", "POST", {
+    origineValida: () => true, sessioneAutista: async () => ({ autista_id: "autista-demo" }), noStore: {}, Response,
+    createSupabaseServerClient: () => ({ rpc: async (nome, dati) => {
+      assert.equal(nome, "roma_rta_registra_ora");
+      assert.equal(dati.p_id, id);
+      assert.equal(dati.p_autista, "autista-demo");
+      assert.equal(dati.p_tipo, "inizio");
+      return { data: false };
+    } }),
+  });
+  const risposta = await marca(new Request("https://example.test", { method: "POST", body: JSON.stringify({ id, tipo: "inizio" }) }));
+  assert.equal(risposta.status, 409);
 });

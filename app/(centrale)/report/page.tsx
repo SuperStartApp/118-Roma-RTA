@@ -18,6 +18,10 @@ import {
   RotateCcw
 } from "lucide-react";
 
+function nomiEquipaggio(assegnazioni: { autisti: { nome: string; cognome: string } | null }[] = []) {
+  return assegnazioni.flatMap(({ autisti }) => autisti ? [autisti.nome + " " + autisti.cognome] : []).join(", ");
+}
+
 export default function ReportPage() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -35,7 +39,7 @@ export default function ReportPage() {
     try {
       let query = supabase
         .from("prenotazioni")
-        .select(`*, pazienti(nome, cognome), autisti(nome, cognome)`)
+        .select(`*, pazienti(nome, cognome), assegnazioni:roma_rta_prenotazioni_autisti(autisti(nome,cognome))`)
         .order("data_appuntamento", { ascending: false });
 
       if (dateFilters.startDate) query = query.gte("data_appuntamento", dateFilters.startDate);
@@ -76,7 +80,7 @@ export default function ReportPage() {
       Data: item.data_appuntamento,
       Orario: item.ora_appuntamento || "",
       Paziente: `${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`.trim(),
-      Autista: item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non assegnato",
+      Autista: nomiEquipaggio(item.assegnazioni) || "Non assegnato",
       Costo_Euro: item.costo || 0,
       Incasso_Originale: item.pagato ? "Incassato" : "Non incassato",
       Stato_Prenotazione: statoPrenotazione(item),
@@ -128,7 +132,7 @@ export default function ReportPage() {
     const tableRows = data.map((item) => [
       item.data_appuntamento || "—",
       `${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`,
-      item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non assegnato",
+      nomiEquipaggio(item.assegnazioni) || "Non assegnato",
       item.annullata_il ? statoPrenotazione(item) : `${statoPrenotazione(item)}\n${!item.ora_inizio_effettiva ? "In attesa" : !item.ora_fine_effettiva ? "In corso" : "Completata"}`,
       formattaImporto(item.costo),
       item.annullata_il && item.pagato ? `${formattaImporto(item.costo)} ${item.rimborso_effettuato_il ? "effettuato" : "da effettuare"}` : "Non previsto",
@@ -181,14 +185,14 @@ export default function ReportPage() {
     scriviTesto(associazione.iscrizioni.join(" | "), 8);
     y += 3;
 
-    scriviTesto("RICEVUTA DI TRASPORTO SANITARIO ORDINARIO", 12, true);
+    scriviTesto("SCHEDA DI TRASPORTO SANITARIO - USO INTERNO", 12, true);
     scriviTesto(`Identificativo Servizio: #${(item.id || "").slice(0, 8).toUpperCase()}`, 9);
     scriviTesto(`Data Emissione: ${new Date().toLocaleDateString("it-IT")}`, 9);
     y += 3;
 
     scriviTesto("DATI PAZIENTE E ASSEGNAZIONE", 10, true);
     scriviTesto(`Assistito: ${item.pazienti?.nome || ""} ${item.pazienti?.cognome || ""}`);
-    scriviTesto(`Equipaggio / Autista: ${item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "Non indicato"}`);
+    scriviTesto(`Equipaggio / Autista: ${nomiEquipaggio(item.assegnazioni) || "Non indicato"}`);
     y += 3;
 
     scriviTesto("DETTAGLI LOGISTICI", 10, true);
@@ -216,7 +220,7 @@ export default function ReportPage() {
       scriviTesto(`Costo ora supplementare: ${item.costo_ora_supplementare} €`, 9);
     }
 
-    doc.save(`Ricevuta_${item.pazienti?.cognome || "Paziente"}_${item.data_appuntamento}.pdf`);
+    doc.save(`Scheda_${item.pazienti?.cognome || "Paziente"}_${item.data_appuntamento}.pdf`);
   };
 
   if (erroreCaricamento && !loading) return <ErroreCaricamento messaggio={erroreCaricamento} onRiprova={() => void fetchData()} />;
@@ -344,12 +348,12 @@ export default function ReportPage() {
 
                   <p className="text-xs font-semibold text-slate-700">{statoPrenotazione(item)}</p>
                   <div className="text-xs text-slate-600 flex justify-between items-center pt-2 border-t border-slate-100">
-                    <span>Autista: {item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "N/D"}</span>
+                    <span>Autista: {nomiEquipaggio(item.assegnazioni) || "N/D"}</span>
                     <button
                       onClick={() => exportSinglePDF(item)}
                       className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition"
                     >
-                      <Download size={12} /> Ricevuta PDF
+                      <Download size={12} /> Scheda PDF
                     </button>
                   </div>
                 </div>
@@ -366,7 +370,7 @@ export default function ReportPage() {
                     <th className="py-3 px-4">Equipaggio</th>
                     <th className="py-3 px-4 text-center">Stato</th>
                     <th className="py-3 px-4 text-right">Importo</th>
-                    <th className="py-3 px-4 text-center">Ricevuta</th>
+                    <th className="py-3 px-4 text-center">Scheda</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
@@ -393,7 +397,7 @@ export default function ReportPage() {
                           {item.pazienti?.nome} {item.pazienti?.cognome}
                         </td>
                         <td className="py-3 px-4 text-slate-600">
-                          {item.autisti ? `${item.autisti.nome} ${item.autisti.cognome}` : "—"}
+                          {nomiEquipaggio(item.assegnazioni) || "-"}
                         </td>
                         <td className="py-3 px-4 text-center">
                           <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${badgeStyle}`}>

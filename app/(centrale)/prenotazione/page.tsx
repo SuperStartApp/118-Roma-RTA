@@ -1,5 +1,8 @@
 "use client";
 
+import AutistiAggiuntivi from "@/components/AutistiAggiuntivi";
+import { formattaNumero } from "@/app/lib/formatta-numero";
+
 import React, { useState, useEffect, useRef, Suspense } from "react";
 import { supabase } from "@/app/lib/supabase";
 import { caricaPazienti, corrispondeRicercaPaziente, type PazienteAnagrafica } from "@/app/lib/pazienti";
@@ -60,6 +63,7 @@ function PrenotazioneFormContent() {
   const [whatsAppUrl, setWhatsAppUrl] = useState<string | null>(null);
   const [existingPazienteId, setExistingPazienteId] = useState<string | null>(null);
   const pazienteCreatoRef = useRef<string | null>(null);
+  const idNuovaCorsa = useRef<string | null>(null);
   const [tesseraSocioInfo, setTesseraSocioInfo] = useState<string | null>(null);
 
   const initialFormState = {
@@ -177,7 +181,7 @@ function PrenotazioneFormContent() {
         if (data) {
           setExistingPazienteId(data.id);
           setTesseraSocioInfo(data.numero_tessera
-            ? `Socio Sostenitore N° #${data.numero_tessera}/${data.anno_tessera || ""}`
+            ? `Socio Sostenitore N° #${formattaNumero(data.numero_tessera)}/${data.anno_tessera || ""}`
             : null);
           setFormData((prev) => ({
             ...prev,
@@ -225,7 +229,9 @@ function PrenotazioneFormContent() {
     : pazienti.filter((p) => p.nome.trim().toLowerCase() === formData.nome.trim().toLowerCase()
       && p.cognome.trim().toLowerCase() === formData.cognome.trim().toLowerCase());
   const pazienteInCaricamento = loadingPaziente || (!!pazienteIdFromUrl && pazienteIdFromUrl !== existingPazienteId);
-  const autistaSelezionato = autisti.find((a) => a.id === formData.autista_id);
+  const [autistiExtra, setAutistiExtra] = useState<string[]>([]);
+  const idsAutisti = formData.autista_id ? [formData.autista_id, ...autistiExtra.filter((id) => id !== formData.autista_id)] : [];
+  const nomiAutisti = idsAutisti.map((id) => autisti.find((a) => a.id === id)).filter((a) => a != null).map((a) => a.nome + " " + a.cognome);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const target = e.target as HTMLInputElement;
@@ -304,10 +310,12 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
       const metodoScelto = formData.metodo_pagamento || "Contanti";
 
       // Inserimento Corsa
-      const { error: rError } = await supabase.from("prenotazioni").insert([
-        {
+      idNuovaCorsa.current ??= crypto.randomUUID();
+      const { error: rError } = await supabase.rpc("roma_rta_crea_prenotazione", {
+        p_id: idNuovaCorsa.current,
+        p_autisti: idsAutisti,
+        p_dati: {
           paziente_id: finalPazienteId,
-          autista_id: formData.autista_id || null,
           data_appuntamento: formData.data_appuntamento,
           ora_appuntamento: formData.ora_appuntamento,
           serve_ossigeno: formData.serve_ossigeno,
@@ -333,7 +341,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
           metodo_pagamento: metodoScelto,
           pagato: formData.pagato,
         },
-      ]);
+      });
 
       if (rError) throw rError;
 
@@ -351,7 +359,9 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
 
       // Reset completo e pulizia URL
       pazienteCreatoRef.current = null;
+      idNuovaCorsa.current = null;
       setFormData(initialFormState);
+      setAutistiExtra([]);
       setExistingPazienteId(null);
       setTesseraSocioInfo(null);
       router.replace("/prenotazione");
@@ -674,7 +684,10 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
                     aria-describedby="autista-stato"
                     name="autista_id"
                     value={formData.autista_id}
-                    onChange={handleChange}
+                    onChange={(event) => {
+                      handleChange(event);
+                      setAutistiExtra((ids) => event.target.value ? ids.filter((id) => id !== event.target.value) : []);
+                    }}
                     className="w-full text-sm bg-slate-50 border border-slate-200 rounded-lg p-2.5 focus:bg-white focus:ring-2 focus:ring-blue-600 outline-none transition"
                   >
                     <option value="">-- Assegna in seguito --</option>
@@ -685,6 +698,8 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
                     ))}
                   </select>
                 </div>
+              <AutistiAggiuntivi autisti={autisti} ids={autistiExtra} principale={formData.autista_id}
+                disabilitato={loadingAutisti || !!erroreAutisti} onChange={setAutistiExtra} />
               <p id="autista-stato" role="status" className="text-xs text-blue-900">
                 {loadingAutisti ? "Caricamento autisti…" : erroreAutisti || (autisti.length === 0
                   ? "Nessun autista attivo nell’elenco. Puoi assegnarlo in seguito."
@@ -1037,7 +1052,7 @@ _Il nostro equipaggio sarà a Vostra disposizione. Per comunicazioni o variazion
               <h2 id="riepilogo-titolo" className="font-bold text-slate-900">6. Riepilogo e conferma</h2>
               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div><dt className="text-xs text-slate-500">Paziente</dt><dd className="font-semibold">{[formData.nome, formData.cognome].filter(Boolean).join(" ") || "Da inserire"} {existingPazienteId ? "· In rubrica" : "· Nuova anagrafica"}</dd></div>
-                <div><dt className="text-xs text-slate-500">Autista</dt><dd className="font-semibold">{autistaSelezionato ? `${autistaSelezionato.nome} ${autistaSelezionato.cognome}` : "Da assegnare in seguito"}</dd></div>
+                <div><dt className="text-xs text-slate-500">Autista</dt><dd className="font-semibold">{nomiAutisti.join(", ") || "Da assegnare in seguito"}</dd></div>
                 <div><dt className="text-xs text-slate-500">Data e ora</dt><dd>{formData.data_appuntamento ? new Date(formData.data_appuntamento + "T00:00:00").toLocaleDateString("it-IT") : "Data da inserire"} · {formData.ora_appuntamento || "Ora da inserire"}</dd></div>
                 <div><dt className="text-xs text-slate-500">Richieste sanitarie</dt><dd>{[formData.serve_ossigeno && "Ossigeno", formData.serve_medico && "Medico / Infermiere"].filter(Boolean).join(" · ") || "Nessuna richiesta aggiuntiva"}</dd></div>
                 <div><dt className="text-xs text-slate-500">Partenza</dt><dd>{[formData.partenza_via, formData.partenza_civico, formData.partenza_citta].filter(Boolean).join(", ") || "Da inserire"}</dd></div>

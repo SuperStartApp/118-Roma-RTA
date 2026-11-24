@@ -51,21 +51,26 @@ test("B: fallisce la corsa, ma il tentativo successivo riutilizza il paziente cr
   const initial = named(file, "initialFormState");
   const ref = { current: null };
   const ids = [];
+  const idNuovaCorsa = { current: null };
   let patients = 0, bookings = 0;
-  const supabase = { from: (table) => table === "pazienti" ? {
+  const supabase = { from: (table) => {
+    assert.equal(table, "pazienti");
+    return {
     insert: () => {
       patients++;
       return { select() { return this; }, single: async () => ({ data: { id: "paziente-creato" }, error: null }) };
     },
-  } : { insert: async (rows) => {
-    ids.push(rows[0].paziente_id);
+  }; }, rpc: async (nome, dati) => {
+    assert.equal(nome, "roma_rta_crea_prenotazione");
+    assert.equal(dati.p_id, "corsa-sintetica");
+    ids.push(dati.p_dati.paziente_id);
     return { error: ++bookings === 1 ? { message: "Errore simulato corsa" } : null };
-  } } };
+  } };
   const save = named(file, "handleSubmit", {
     formData: { ...initial, nome: "Mario", cognome: "Rossi", telefono: "3331111111" },
-    initialFormState: initial, existingPazienteId: null, pazienteCreatoRef: ref, supabase,
+    initialFormState: initial, existingPazienteId: null, pazienteCreatoRef: ref, idNuovaCorsa, crypto: { randomUUID: () => "corsa-sintetica" }, supabase,
     setLoading: noop, setStatusMessage: noop, setWhatsAppUrl: noop, setExistingPazienteId: noop,
-    setFormData: noop, setTesseraSocioInfo: noop, router: { replace: noop },
+    idsAutisti: [], setAutistiExtra: noop, setFormData: noop, setTesseraSocioInfo: noop, router: { replace: noop },
     window: { open: noop, scrollTo: noop }, generaMessaggioWhatsApp: () => "https://example.test",
   });
   await save({ preventDefault: noop });
@@ -96,32 +101,20 @@ test("C: tutti i campi anagrafici esistenti sono in sola lettura", () => {
   assert.equal(found.size, 8);
 });
 
-test("D/E: emissione verificata prima di WhatsApp e link tessera sempre pubblico", async () => {
-  for (const outcome of ["error", "no-row", "success"]) {
-    let opened, displayed = [{ pazienti: { id: "p-demo", nome: "Mario", cognome: "Rossi", telefono: "3331111111" } }];
-    const query = {
-      update: () => query, eq: () => query, is: () => query, select: () => query,
-      maybeSingle: async () => ({
-        error: outcome === "error" ? { message: "Errore simulato" } : null,
-        data: outcome === "success" ? { id: "p-demo", numero_tessera: 501, anno_tessera: 2026 } : null,
-      }),
-    };
-    const send = named("app/(centrale)/autista/dashboard/page.tsx", "inviaTesseraWhatsApp", {
-      condividiTessera: async () => ({ link: "https://gestionale.romarta.it/tessera-pubblica#token-demo" }), associazione, supabase: { rpc: async () => ({ data: 501, error: null }), from: () => query },
-      setCorse: (fn) => { displayed = fn(displayed); }, alert: noop,
-      window: { location: { origin: "http://localhost:3000" }, open: (url) => { opened = url; } },
-    });
-    await send(displayed[0]);
-    if (outcome !== "success") {
-      assert.equal(opened, undefined);
-      assert.equal(displayed[0].pazienti.numero_tessera, undefined);
-    } else {
-      assert.equal(displayed[0].pazienti.numero_tessera, 501);
-      const message = new URL(opened).searchParams.get("text");
-      assert.ok(message.includes("https://gestionale.romarta.it/tessera-pubblica#token-demo"));
-      assert.ok(!message.includes("localhost"));
-    }
-  }
+test("D/E: la centrale condivide solo tessere con numero salvato", async () => {
+  const condivise = [];
+  const apri = named("app/(centrale)/pazienti/page.tsx", "apriWhatsApp", {
+    condivisioneInCorso: false, setPazienteCondivisione: noop, setErroreCondivisione: noop,
+    setWhatsappPronto: noop, setEsitoCondivisione: noop, setCondivisioneInCorso: noop,
+    apriTesseraWhatsApp: async (id, telefono) => {
+      condivise.push({ id, telefono });
+      return { url: "https://example.test", aperto: true };
+    },
+  });
+  await apri({ id: "sintetico", telefono: "3331111111" });
+  assert.equal(condivise.length, 0);
+  await apri({ id: "sintetico", telefono: "3331111111", numero_tessera: 501 });
+  assert.equal(condivise.length, 1);
 });
 
 test("F: Link copiato appare solo dopo il successo della Clipboard API", async () => {
@@ -141,13 +134,13 @@ test("F: Link copiato appare solo dopo il successo della Clipboard API", async (
   }
 });
 
-test("G/H: zero visualizzato e vecchio login PIN sospeso", () => {
+test("G/H: zero visualizzato e login autista tramite API", () => {
   assert.ok(fs.readFileSync("app/(centrale)/prenotazioni/[id]/page.tsx", "utf8").includes("{formattaImporto(corsa.costo)}"));
-  const login = fs.readFileSync("app/(centrale)/autista/page.tsx", "utf8");
-  assert.ok(login.includes("temporaneamente sospeso"));
+  const login = fs.readFileSync("app/(autista)/autista/page.tsx", "utf8");
+  assert.ok(login.includes("/api/autista/login"));
   assert.ok(!login.includes("localStorage"));
   assert.ok(!login.includes(".from("));
-  assert.ok(fs.readFileSync("app/(centrale)/autisti/page.tsx", "utf8").includes("da 4 a 6 cifre"));
+  assert.ok(fs.readFileSync("app/(centrale)/autisti/page.tsx", "utf8").includes("6 cifre"));
 });
 
 test("I: letture fallite producono un errore distinto dall’elenco vuoto", async () => {

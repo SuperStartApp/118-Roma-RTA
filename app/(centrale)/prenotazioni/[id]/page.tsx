@@ -1,11 +1,14 @@
 "use client";
 
+import { formattaNumero } from "@/app/lib/formatta-numero";
+
 import React, { useEffect, useState, Suspense } from "react";
 import { supabase } from "@/app/lib/supabase";
 import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { statoPrenotazione, formattaImporto } from "@/app/lib/stato-prenotazione";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import EmissioneRicevuta from "@/components/EmissioneRicevuta";
 import AvvisaAutista from "@/components/AvvisaAutista";
 import { 
   ArrowLeft, 
@@ -43,12 +46,19 @@ function CorsaDetailContent() {
       try {
         const { data, error } = await supabase
           .from("prenotazioni")
-          .select(`*, pazienti(*), autisti(nome, cognome, telefono)`)
+          .select(`*, pazienti(*), assegnazioni:roma_rta_prenotazioni_autisti(autista_id, autisti(nome,cognome,telefono))`)
           .eq("id", params.id)
           .single();
 
         if (error) throw error;
-        setCorsa(data);
+        const ids = [data.inizio_registrato_da, data.fine_registrata_da].filter((id): id is string => typeof id === "string");
+        const { data: registranti } = ids.length
+          ? await supabase.from("autisti").select("id,nome,cognome").in("id", ids)
+          : { data: [] };
+        setCorsa({ ...data,
+          inizio_da: registranti?.find((autista) => autista.id === data.inizio_registrato_da),
+          fine_da: registranti?.find((autista) => autista.id === data.fine_registrata_da),
+        });
       } catch (error: any) {
         console.error("Errore caricamento dettagli:", error.message);
         setErroreCaricamento("Impossibile leggere la scheda della corsa. Verifica il collegamento e riprova.");
@@ -88,7 +98,7 @@ function CorsaDetailContent() {
 
     const haTessera = corsa.pazienti.numero_tessera;
     const testoTessera = haTessera
-      ? `\n💳 *Tessera Socio Sostenitore:* N° ${corsa.pazienti.numero_tessera}/${corsa.pazienti.anno_tessera || new Date().getFullYear()}\n`
+      ? `\n💳 *Tessera Socio Sostenitore:* N° ${formattaNumero(corsa.pazienti.numero_tessera)}/${corsa.pazienti.anno_tessera || new Date().getFullYear()}\n`
       : "";
 
     const messaggio = 
@@ -143,7 +153,7 @@ function CorsaDetailContent() {
               </span>
               {corsa.pazienti?.numero_tessera && (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  <ShieldCheck size={11} /> SOCIO SOSTENITORE N° {corsa.pazienti.numero_tessera}
+                  <ShieldCheck size={11} /> SOCIO SOSTENITORE N° {formattaNumero(corsa.pazienti.numero_tessera)}
                 </span>
               )}
             </div>
@@ -191,7 +201,7 @@ function CorsaDetailContent() {
           <div className="col-span-2 sm:col-span-1">
             <span className="text-slate-400 block">Equipaggio / Autista</span>
             <span className="font-semibold text-blue-300">
-              {corsa.autisti ? `${corsa.autisti.nome} ${corsa.autisti.cognome}` : "Non ancora assegnato"}
+              {corsa.assegnazioni?.map((a: { autisti: { nome: string; cognome: string } | null }) => a.autisti ? a.autisti.nome + " " + a.autisti.cognome : "").filter(Boolean).join(", ") || "Non ancora assegnato"}
             </span>
           </div>
         </div>
@@ -213,7 +223,9 @@ function CorsaDetailContent() {
         >
           <MessageCircle size={18} /> Invia Dettagli & Tessera via WhatsApp
         </button>
-        <AvvisaAutista autistaId={corsa.autista_id} telefono={corsa.autisti?.telefono} />
+        {corsa.assegnazioni?.map((a: { autista_id: string; autisti: { nome: string; cognome: string; telefono?: string } | null }) => <div key={a.autista_id}>
+          <span>{a.autisti?.nome} {a.autisti?.cognome}</span> <AvvisaAutista autistaId={a.autista_id} telefono={a.autisti?.telefono} />
+        </div>)}
       </div>
 
       {/* DETTAGLI TRATTA CON NAVIGATORE 1-TAP */}
@@ -342,6 +354,8 @@ function CorsaDetailContent() {
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Durata Effettiva</span>
               <p className="text-base font-bold text-slate-800 mt-0.5">{calcolaDurata() || "In attesa"}</p>
+              {corsa.inizio_da && <p className="text-xs text-slate-600">Inizio: {corsa.inizio_da.nome} {corsa.inizio_da.cognome}</p>}
+              {corsa.fine_da && <p className="text-xs text-slate-600">Fine: {corsa.fine_da.nome} {corsa.fine_da.cognome}</p>}
             </div>
             <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Importo</span>
@@ -356,6 +370,10 @@ function CorsaDetailContent() {
         </div>
       </div>
 
+        <EmissioneRicevuta key={corsa.id} id={corsa.id}
+          emettibile={corsa.pagato === true && Number(corsa.costo) > 0 && !corsa.annullata_il && !corsa.rimborso_effettuato_il}
+          importo={Number(corsa.costo)} metodo={corsa.metodo_pagamento} dataServizio={corsa.data_appuntamento}
+          intestatario={[corsa.pazienti?.nome, corsa.pazienti?.cognome].filter(Boolean).join(" ")} />
     </div>
   );
 }

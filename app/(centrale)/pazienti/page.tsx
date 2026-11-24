@@ -1,5 +1,7 @@
 "use client";
 
+import { formattaNumero } from "@/app/lib/formatta-numero";
+
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/app/lib/supabase";
 import ErroreCaricamento from "@/components/ErroreCaricamento";
@@ -50,9 +52,6 @@ export default function PazientiPage() {
   const [erroreCaricamento, setErroreCaricamento] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
-  // ANNO CORRENTE IMPOSTATO VIA EFFECT PER EVITARE ERRORI NEXT.JS
-  const [currentYear, setCurrentYear] = useState<number>(2024);
-
   // STATI MODAL MODIFICA / CREAZIONE
   const [modalAperto, setModalAperto] = useState(false);
   const [isNuovoPaziente, setIsNuovoPaziente] = useState(false);
@@ -69,15 +68,10 @@ export default function PazientiPage() {
     peso_approssimativo: "",
     patologia: "",
     numero_tessera: "",
-    anno_tessera: 2024
+    anno_tessera: ""
   });
 
   useEffect(() => {
-    // Calcolo sicuro lato client dell'anno
-    const anno = new Date().getFullYear();
-    setCurrentYear(anno);
-    setFormPaziente((prev: any) => ({ ...prev, anno_tessera: anno }));
-
     fetchPazientiEStorico();
   }, []);
 
@@ -140,7 +134,7 @@ export default function PazientiPage() {
       peso_approssimativo: p.peso_approssimativo || "",
       patologia: p.patologia || "",
       numero_tessera: p.numero_tessera || "",
-      anno_tessera: p.anno_tessera || currentYear
+      anno_tessera: p.anno_tessera ?? ""
     });
     setModalAperto(true);
   };
@@ -160,27 +154,9 @@ export default function PazientiPage() {
       peso_approssimativo: "",
       patologia: "",
       numero_tessera: "",
-      anno_tessera: currentYear
+      anno_tessera: ""
     });
     setModalAperto(true);
-  };
-
-  // ASSEGNA AUTOMATICAMENTE IL PROSSIMO NUMERO TESSERA
-  const generaNumeroTesseraAuto = async () => {
-    try {
-      const { data: prossimoNum, error } = await supabase.rpc("genera_prossima_tessera", {
-        tabella: "pazienti",
-        offset_iniziale: 500
-      });
-      if (error) throw error;
-      setFormPaziente((prev: any) => ({
-        ...prev,
-        numero_tessera: prossimoNum,
-        anno_tessera: currentYear
-      }));
-    } catch (err: any) {
-      alert("Errore generazione numero: " + err.message);
-    }
   };
 
   // SALVATAGGIO MODIFICHE O NUOVO
@@ -198,8 +174,7 @@ export default function PazientiPage() {
       luogo_nascita: formPaziente.luogo_nascita.trim() || null,
       peso_approssimativo: formPaziente.peso_approssimativo.trim() || null,
       patologia: formPaziente.patologia.trim() || null,
-      numero_tessera: formPaziente.numero_tessera ? parseInt(formPaziente.numero_tessera) : null,
-      anno_tessera: formPaziente.anno_tessera ? parseInt(formPaziente.anno_tessera) : currentYear,
+      ...(formPaziente.numero_tessera === "auto" ? { numero_tessera: 0 } : {}),
     };
 
     try {
@@ -349,7 +324,7 @@ export default function PazientiPage() {
                           {haTessera && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
                               <ShieldCheck size={11} className="text-amber-600" />
-                              Socio #{p.numero_tessera}
+                              Socio #{formattaNumero(p.numero_tessera)}
                             </span>
                           )}
                         </div>
@@ -573,10 +548,10 @@ export default function PazientiPage() {
                   {!formPaziente.numero_tessera && (
                     <button
                       type="button"
-                      onClick={generaNumeroTesseraAuto}
+                      onClick={() => setFormPaziente({ ...formPaziente, numero_tessera: "auto" })}
                       className="text-[11px] font-bold text-amber-800 bg-amber-200/60 hover:bg-amber-200 px-2.5 py-1 rounded-lg transition"
                     >
-                      Assegna Prossimo N°
+                      Assegna al salvataggio
                     </button>
                   )}
                 </div>
@@ -585,19 +560,16 @@ export default function PazientiPage() {
                   <div>
                     <label className="text-[10px] font-bold text-amber-800 uppercase block mb-0.5">N° Tessera</label>
                     <input
-                      type="number"
-                      placeholder="es. 501"
-                      value={formPaziente.numero_tessera}
-                      onChange={(e) => setFormPaziente({ ...formPaziente, numero_tessera: e.target.value })}
+                      readOnly
+                      value={formPaziente.numero_tessera === "auto" ? "Automatico" : formattaNumero(formPaziente.numero_tessera, "")}
                       className="w-full bg-white border border-amber-200 rounded-xl p-2 text-xs font-bold font-mono outline-none"
                     />
                   </div>
                   <div>
                     <label className="text-[10px] font-bold text-amber-800 uppercase block mb-0.5">Anno Validità</label>
                     <input
-                      type="number"
-                      value={formPaziente.anno_tessera}
-                      onChange={(e) => setFormPaziente({ ...formPaziente, anno_tessera: e.target.value })}
+                      readOnly
+                      value={formPaziente.numero_tessera === "auto" ? "Automatico" : formPaziente.anno_tessera}
                       className="w-full bg-white border border-amber-200 rounded-xl p-2 text-xs font-bold font-mono outline-none"
                     />
                   </div>

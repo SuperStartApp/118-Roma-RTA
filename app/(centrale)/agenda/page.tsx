@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 
 interface CorsaOggi {
+  assegnazioni: { autisti: { nome: string; cognome: string } | null }[];
   id: string;
   ora_appuntamento: string;
   ora_inizio_effettiva: string | null;
@@ -59,13 +60,13 @@ export default function AgendaGiornaliera() {
     try {
       const { data, error } = await supabase
         .from("prenotazioni")
-        .select(`*, pazienti(nome, cognome)`)
+        .select(`*, pazienti(nome, cognome), assegnazioni:roma_rta_prenotazioni_autisti(autisti(nome,cognome))`)
         .eq("data_appuntamento", dataOggiIso)
         .is("annullata_il", null)
         .order("ora_appuntamento", { ascending: true });
 
       if (error) throw error;
-      setCorse(data || []);
+      setCorse((data || []) as unknown as CorsaOggi[]);
     } catch (error: any) {
       console.error("Errore agenda:", error);
       setErroreCaricamento("Impossibile caricare l’agenda. Verifica la connessione e riprova.");
@@ -170,6 +171,8 @@ export default function AgendaGiornaliera() {
                             {statoTesto}
                           </span>
                         </div>
+
+                        <p className="text-xs text-slate-600">Autisti: {corsa.assegnazioni.flatMap(({ autisti }) => autisti ? [autisti.nome + " " + autisti.cognome] : []).join(", ") || "Da assegnare"}</p>
 
                         {/* Tratta */}
                         <div className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">

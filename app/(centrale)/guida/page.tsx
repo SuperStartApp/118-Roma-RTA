@@ -42,8 +42,8 @@ const sezioni = [
     titolo: "Autisti e accesso", href: "/autisti",
     passi: [
       "La centrale può gestire gli autisti e assegnare le corse dal gestionale.",
-      "L’accesso al pannello tramite PIN è temporaneamente sospeso. I PIN esistenti non sono stati modificati.",
-      "Per comunicare le corse agli autisti, contattali direttamente. Non inviare il link di accesso come se fosse operativo.",
+      "Ogni autista accede al pannello con il proprio PIN e vede le corse assegnate.",
+      "Usa Avvisa autista per inviare il collegamento al pannello operativo.",
     ],
     nota: "La conferma dell’incasso dal pannello autista NON è attiva. Gli incassi vengono registrati dalla centrale.",
   },

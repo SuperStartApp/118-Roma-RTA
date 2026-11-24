@@ -11,7 +11,8 @@ import {
   CalendarDays,
   Ambulance,
   Users,
-  BookOpen
+  BookOpen,
+  Receipt
 } from "lucide-react";
 
 
@@ -29,6 +30,7 @@ function Navbar() {
     { href: "/prenotazioni", label: "Gestione corse", mobileLabel: "Corse", icon: ClipboardList },
     { href: "/pazienti", label: "Pazienti e tessere", mobileLabel: "Pazienti", icon: Users },
     { href: "/prenotazione", label: "Nuovo trasporto", mobileLabel: "Nuovo", icon: PlusCircle, highlight: true },
+    { href: "/ricevute", label: "Archivio ricevute", mobileLabel: "Ricevute", icon: Receipt },
     { href: "/guida", label: "Guida", mobileLabel: "Guida", icon: BookOpen },
   ];
   const isActiveRoute = (href: string) => pathname === href || (href !== "/" && pathname?.startsWith(`${href}/`));

@@ -6,6 +6,7 @@ import ErroreCaricamento from "@/components/ErroreCaricamento";
 import { annullaPrenotazione, registraRimborso, cambiaPagamento } from "@/app/lib/operazioni-prenotazioni";
 import { statoPrenotazione, rimborsoPendente, formattaImporto, costoValido, type DatiEconomiciPrenotazione } from "@/app/lib/stato-prenotazione";
 import Link from "next/link";
+import AutistiAggiuntivi from "@/components/AutistiAggiuntivi";
 import AvvisaAutista from "@/components/AvvisaAutista";
 import { 
   Search, 
@@ -34,6 +35,7 @@ interface Prenotazione extends DatiEconomiciPrenotazione {
   metodo_pagamento: string;
   pagato: boolean;
   autista_id: string | null;
+  assegnazioni: { autista_id: string; autisti: { id: string; nome: string; cognome: string; telefono?: string | null } | null }[];
   partenza_citta?: string;
   partenza_via?: string;
   arrivo_citta?: string;
@@ -98,12 +100,12 @@ export default function ListaPrenotazioni() {
     try {
       const { data, error } = await supabase
         .from("prenotazioni")
-        .select(`*, pazienti(id, nome, cognome, telefono), autisti(id, nome, cognome, telefono)`)
+        .select(`*, pazienti(id, nome, cognome, telefono), autisti!autista_id(id, nome, cognome, telefono), assegnazioni:roma_rta_prenotazioni_autisti(autista_id, autisti(id,nome,cognome,telefono))`)
         .order("data_appuntamento", { ascending: false })
         .order("ora_appuntamento", { ascending: true });
 
       if (error) throw error;
-      setPrenotazioni(data || []);
+      setPrenotazioni((data || []) as unknown as Prenotazione[]);
     } catch (error: any) {
       console.error("Errore fetch prenotazioni:", error.message);
       setErroreCaricamento("Impossibile caricare le prenotazioni. Verifica la connessione e riprova.");
@@ -113,31 +115,14 @@ export default function ListaPrenotazioni() {
   }
 
   // ASSEGNAZIONE / CAMBIO AUTISTA AL VOLO
-  async function handleCambioAutista(prenotazioneId: string, nuovoAutistaId: string) {
+  async function handleCambioAutista(prenotazioneId: string, ids: string[]) {
     if (operationLock.current || erroreAutisti || prenotazioni.find((p) => p.id === prenotazioneId)?.annullata_il) return;
     operationLock.current = true;
     setUpdatingId(prenotazioneId);
     try {
-      const val = nuovoAutistaId === "" ? null : nuovoAutistaId;
-      const { data, error } = await supabase
-        .from("prenotazioni")
-        .update({ autista_id: val })
-        .eq("id", prenotazioneId)
-        .is("annullata_il", null)
-        .select("id, autista_id").maybeSingle();
-
+      const { error } = await supabase.rpc("roma_rta_assegna_autisti", { p_id: prenotazioneId, p_autisti: ids });
       if (error) throw error;
-      if (!data || data.autista_id !== val) throw new Error("Assegnazione non confermata. Aggiorna l’elenco.");
-
-      setPrenotazioni((prev) =>
-        prev.map((item) => {
-          if (item.id === prenotazioneId) {
-            const autistaObj = autisti.find((a) => a.id === val) || null;
-            return { ...item, autista_id: val, autisti: autistaObj };
-          }
-          return item;
-        })
-      );
+      await fetchPrenotazioni();
     } catch (err: any) {
       alert("Errore durante l'assegnazione dell'autista: " + err.message);
     } finally {
@@ -187,6 +172,21 @@ export default function ListaPrenotazioni() {
     );
   };
 
+  const extraAutisti = (p: Prenotazione) => p.assegnazioni.filter(({ autista_id }) => autista_id !== p.autista_id);
+  function cambiaPrincipale(p: Prenotazione, id: string) {
+    const extra = extraAutisti(p).filter(({ autista_id }) => autista_id !== id).map(({ autista_id }) => autista_id);
+    void handleCambioAutista(p.id, id ? [id, ...extra] : extra);
+  }
+
+  function mostraAutistiAggiuntivi(p: Prenotazione) {
+    const extra = extraAutisti(p);
+    const nonAttivi = extra.flatMap(({ autista_id, autisti: autista }) =>
+      autista && !autisti.some((item) => item.id === autista_id) ? [autista] : []);
+    return <AutistiAggiuntivi autisti={[...autisti, ...nonAttivi]} ids={extra.map(({ autista_id }) => autista_id)}
+      principale={p.autista_id} disabilitato={!!(p.annullata_il || processingId || updatingId || erroreAutisti)}
+      onChange={(ids) => void handleCambioAutista(p.id, p.autista_id ? [p.autista_id, ...ids] : ids)} />;
+  }
+
   const badgePagamento = (p: Prenotazione) => (
     <button type="button" disabled={!!p.annullata_il || !!processingId || !!updatingId}
       onClick={() => confermaOperazione(p, "pagamento")} aria-pressed={p.pagato}
@@ -205,7 +205,7 @@ export default function ListaPrenotazioni() {
 
   // CALCOLO CONTATORI
   const corseOggi = todayStr ? prenotazioni.filter((p) => !p.annullata_il && p.data_appuntamento === todayStr) : [];
-  const corseDaAssegnare = prenotazioni.filter((p) => !p.annullata_il && !p.autista_id);
+  const corseDaAssegnare = prenotazioni.filter((p) => !p.annullata_il && p.assegnazioni.length === 0);
 
   // FILTRAGGIO IN BASE AL TAB SELEZIONATO
   let listaFiltrata = prenotazioni;
@@ -233,7 +233,7 @@ export default function ListaPrenotazioni() {
   }
 
   if (filterAutista && tabAttivo !== "da_assegnare") {
-    listaFiltrata = listaFiltrata.filter((p) => p.autista_id === filterAutista);
+    listaFiltrata = listaFiltrata.filter((p) => p.assegnazioni.some((a) => a.autista_id === filterAutista));
   }
 
   if (filterStato === "attive") listaFiltrata = listaFiltrata.filter((p) => !p.annullata_il);
@@ -438,7 +438,7 @@ export default function ListaPrenotazioni() {
                   <div
                     key={p.id}
                     className={`bg-white rounded-2xl p-4 border shadow-sm space-y-3 ${
-                      !p.annullata_il && !p.autista_id ? "border-amber-300 ring-2 ring-amber-400/20" : "border-slate-200"
+                      !p.annullata_il && p.assegnazioni.length === 0 ? "border-amber-300 ring-2 ring-amber-400/20" : "border-slate-200"
                     }`}
                   >
                     <div className="flex flex-col items-start justify-between gap-3 sm:flex-row">
@@ -461,12 +461,14 @@ export default function ListaPrenotazioni() {
                     </div>
 
                     {/* Assegnazione Autista Rapida */}
-                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 flex items-center gap-2">
-                      <UserCheck size={16} className={p.autista_id ? "text-blue-600" : "text-amber-600"} />
+                    <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <UserCheck size={16} className={p.autista_id ? "text-blue-600" : "text-amber-600"} />
                       <select
+                        aria-label="Autista principale"
                         value={p.autista_id || ""}
                         disabled={!!p.annullata_il || !!processingId || !!updatingId || !!erroreAutisti}
-                        onChange={(e) => handleCambioAutista(p.id, e.target.value)}
+                        onChange={(e) => cambiaPrincipale(p, e.target.value)}
                         className="w-full text-xs font-bold text-slate-800 bg-transparent outline-none cursor-pointer"
                       >
                         <option value="">⚠️ NESSUN AUTISTA (Assegna ora)</option>
@@ -477,6 +479,8 @@ export default function ListaPrenotazioni() {
                           </option>
                         ))}
                       </select>
+                      </div>
+                      {mostraAutistiAggiuntivi(p)}
                     </div>
 
                     {/* Importo, dettaglio e conservazione dello storico */}
@@ -491,7 +495,10 @@ export default function ListaPrenotazioni() {
                           <Eye size={13} /> Scheda
                         </Link>
                         
-                        <AvvisaAutista autistaId={p.autista_id} telefono={p.autisti?.telefono} />
+                        {p.assegnazioni.map(({ autista_id, autisti: autista }) => (
+                          <AvvisaAutista key={autista_id} autistaId={autista_id} telefono={autista?.telefono}
+                            nome={autista && `${autista.nome} ${autista.cognome}`.trim()} />
+                        ))}
                         {azionePrenotazione(p)}
                       </div>
                     </div>
@@ -550,11 +557,12 @@ export default function ListaPrenotazioni() {
 
                         {/* ASSEGNAZIONE AUTISTA AL VOLO INLINE */}
                         <td className="py-3 px-4">
-                          <div className="inline-flex items-center gap-1.5">
+                          <div className="space-y-2">
                             <select
+                              aria-label="Autista principale"
                               value={p.autista_id || ""}
                               disabled={!!p.annullata_il || !!processingId || !!updatingId || !!erroreAutisti}
-                              onChange={(e) => handleCambioAutista(p.id, e.target.value)}
+                              onChange={(e) => cambiaPrincipale(p, e.target.value)}
                               className={`text-xs font-semibold px-2.5 py-1.5 rounded-xl border outline-none cursor-pointer transition ${
                                 p.autista_id 
                                 ? "bg-blue-50/60 border-blue-200 text-blue-900" 
@@ -569,6 +577,7 @@ export default function ListaPrenotazioni() {
                                 </option>
                               ))}
                             </select>
+                            {mostraAutistiAggiuntivi(p)}
                             {updatingId === p.id && <Loader2 size={14} className="animate-spin text-blue-600" />}
                           </div>
                         </td>
@@ -593,7 +602,10 @@ export default function ListaPrenotazioni() {
                             </Link>
 
                             {/* ANNULLAMENTO / RIMBORSO */}
-                            <AvvisaAutista autistaId={p.autista_id} telefono={p.autisti?.telefono} />
+                            {p.assegnazioni.map(({ autista_id, autisti: autista }) => (
+                              <AvvisaAutista key={autista_id} autistaId={autista_id} telefono={autista?.telefono}
+                                nome={autista && `${autista.nome} ${autista.cognome}`.trim()} />
+                            ))}
                             {azionePrenotazione(p)}
                           </div>
                         </td>
