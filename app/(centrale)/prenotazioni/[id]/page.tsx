@@ -373,7 +373,8 @@ function CorsaDetailContent() {
         <EmissioneRicevuta key={corsa.id} id={corsa.id}
           emettibile={corsa.pagato === true && Number(corsa.costo) > 0 && !corsa.annullata_il && !corsa.rimborso_effettuato_il}
           importo={Number(corsa.costo)} metodo={corsa.metodo_pagamento} dataServizio={corsa.data_appuntamento}
-          intestatario={[corsa.pazienti?.nome, corsa.pazienti?.cognome].filter(Boolean).join(" ")} />
+          intestatario={[corsa.pazienti?.nome, corsa.pazienti?.cognome].filter(Boolean).join(" ")}
+          telefonoProposto={corsa.pazienti?.telefono} />
     </div>
   );
 }

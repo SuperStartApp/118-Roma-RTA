@@ -11,16 +11,21 @@ export async function apriTesseraWhatsApp(id: string, telefono: string, deps: Di
   const pazienteId = richiediIdPaziente(id);
   const numero = numeroWhatsApp(telefono);
   if (!numero) throw new Error("Numero WhatsApp non valido. Correggi il recapito nella scheda paziente.");
+  return apriWhatsAppConLink(numero, deps.apriFinestra, async () => {
+    const risultato = await deps.creaLink(pazienteId);
+    return "ROMA R.T.A. - La tua tessera associativa: " + verificaLinkTesseraPubblica(risultato.link);
+  });
+}
+
+export async function apriWhatsAppConLink(numero: string, apriFinestra: () => Window | null, preparaTesto: () => Promise<string>) {
   let finestra: Window | null = null;
   // Eseguito nel click, prima di qualsiasi await. Nessun token nella pagina vuota.
   try {
-    finestra = deps.apriFinestra();
+    finestra = apriFinestra();
     if (finestra) finestra.opener = null;
   } catch { finestra?.close(); finestra = null; }
   try {
-    const risultato = await deps.creaLink(pazienteId);
-    const link = verificaLinkTesseraPubblica(risultato.link);
-    const testo = "ROMA R.T.A. - La tua tessera associativa: " + link;
+    const testo = await preparaTesto();
     const url = "https://wa.me/" + numero + "?text=" + encodeURIComponent(testo);
     let aperto = false;
     if (finestra && !finestra.closed) {

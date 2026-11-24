@@ -3,24 +3,26 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DocumentoRicevuta from "@/components/DocumentoRicevuta";
+import InviaRicevutaWhatsApp from "@/components/InviaRicevutaWhatsApp";
 import { identificativoRicevuta, type Ricevuta } from "@/app/lib/ricevute";
 import { formattaImporto } from "@/app/lib/stato-prenotazione";
 import { supabase } from "@/app/lib/supabase";
 
 const dimensionePagina = 25;
+type VoceArchivio = Ricevuta & { prenotazioni: { pazienti: { telefono: string | null } | null } | null };
 
 export default function ArchivioRicevute() {
   const [pagina, setPagina] = useState(0);
-  const [risultato, setRisultato] = useState<{ pagina: number; documenti: Ricevuta[]; totale: number; errore: boolean }>();
+  const [risultato, setRisultato] = useState<{ pagina: number; documenti: VoceArchivio[]; totale: number; errore: boolean }>();
   const [aperta, setAperta] = useState<string>();
   const corrente = risultato?.pagina === pagina ? risultato : undefined;
 
   useEffect(() => {
     let attivo = true;
     const inizio = pagina * dimensionePagina;
-    void supabase.from("roma_rta_ricevute").select("*", { count: "exact" })
+    void supabase.from("roma_rta_ricevute").select("*, prenotazioni(pazienti(telefono))", { count: "exact" })
       .order("emessa_il", { ascending: false }).order("id")
-      .range(inizio, inizio + dimensionePagina - 1).then(({ data, count, error }) => {
+      .range(inizio, inizio + dimensionePagina - 1).returns<VoceArchivio[]>().then(({ data, count, error }) => {
         if (attivo) setRisultato({ pagina, documenti: data || [], totale: count || 0, errore: !!error });
       });
     return () => { attivo = false; };
@@ -40,6 +42,7 @@ export default function ArchivioRicevute() {
             <button type="button" aria-expanded={aperta === documento.id} className="text-blue-800 underline"
               onClick={() => setAperta(aperta === documento.id ? undefined : documento.id)}>PDF e condivisione</button>
           </div>
+          <InviaRicevutaWhatsApp id={documento.id} telefonoProposto={documento.prenotazioni?.pazienti?.telefono} />
           {aperta === documento.id && <DocumentoRicevuta ricevuta={documento} />}
         </li>)}
       </ul>}

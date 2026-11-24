@@ -93,6 +93,11 @@ try {
   const esiti = (await sql(postinstallazione)).split("\n");
   assert.equal(esiti.length, 7);
   assert.ok(esiti.every((riga) => riga.split("|")[1] === "PASS"));
+  const postCondivisione = "BEGIN READ ONLY;\n" +
+    readFileSync("supabase/checks/postinstallazione_condivisione_ricevute.sql", "utf8") + "\nROLLBACK;";
+  const esitiCondivisione = (await sql(postCondivisione)).split("\n");
+  assert.equal(esitiCondivisione.length, 8);
+  assert.ok(esitiCondivisione.every((riga) => riga.split("|")[1] === "PASS"), esitiCondivisione.join("\n"));
   await fermaOrologio("2026-12-31 22:59:59+00");
   await sql(chiamante + "INSERT INTO public.pazienti (nome, numero_tessera, anno_tessera) VALUES ('Legacy', 800, 2026);");
   await assert.rejects(sql(chiamante + "INSERT INTO public.pazienti (nome, numero_tessera, anno_tessera) VALUES ('Duplicata', 800, 2026);"), /occupato/);
@@ -164,10 +169,35 @@ try {
   await sql(chiamante + "UPDATE public.prenotazioni SET pagato = true WHERE id = '" + nonPagata + "';");
   const nuoveRicevute = await concorrenza(chiamante, emetti(altraCorsa), emetti(nonPagata));
   assert.notEqual(nuoveRicevute[0], nuoveRicevute[1]);
+  const hash = "c".repeat(64);
+  const nuovoHash = "d".repeat(64);
+  const hashAltra = "e".repeat(64);
+  const condividi = (id, valore) => "SELECT public.roma_rta_condividi_ricevuta('" + id + "', '" + valore + "');";
+  const leggi = (valore) => "SELECT id FROM public.roma_rta_leggi_ricevuta_condivisa('" + valore + "');";
+  const revoca = "SELECT public.roma_rta_revoca_ricevuta('" + emessa + "');";
+  await assert.rejects(sql("SET ROLE authenticated; " + condividi(emessa, hash)), /42501/);
+  await assert.rejects(sql(chiamante + leggi(hash)), /42501/);
+  await assert.rejects(sql("SET ROLE anon; " + leggi(hash)), /42501/);
+  await assert.rejects(sql(chiamante + condividi(randomUUID(), hash)), /P0002/);
+  const progressivi = await sql("SELECT serie, anno, prossimo FROM roma_rta_private.ricevute_progressivi ORDER BY anno, serie;");
+  await sql(chiamante + condividi(emessa, hash) + condividi(nuoveRicevute[0], hashAltra));
+  await assertSql(corse + leggi(hash), emessa);
+  await assertSql(corse + leggi(hashAltra), nuoveRicevute[0]);
+  await sql(chiamante + condividi(emessa, nuovoHash));
+  await assertSql(corse + leggi(hash), "");
+  await assertSql(corse + leggi(nuovoHash), emessa);
+  await assertSql("SELECT (scade_il BETWEEN now() + interval '47 hours 59 minutes' AND now() + interval '48 hours') FROM roma_rta_private.ricevute_condivisioni WHERE token_hash = '" + nuovoHash + "';", "t");
+  await sql("UPDATE roma_rta_private.ricevute_condivisioni SET scade_il = now() - interval '1 second' WHERE token_hash = '" + nuovoHash + "';");
+  await assertSql(corse + leggi(nuovoHash), "");
+  await sql(chiamante + condividi(emessa, nuovoHash) + revoca);
+  await assertSql(corse + leggi(nuovoHash), "");
+  await assertSql(corse + leggi(hashAltra), nuoveRicevute[0]);
+  await assertSql("SELECT serie, anno, prossimo FROM roma_rta_private.ricevute_progressivi ORDER BY anno, serie;", progressivi);
   await assertSql(chiamante + "SELECT serie, anno, numero FROM public.roma_rta_ricevute ORDER BY anno, numero;", "DIG|2026|500\nDIG|2027|1\nDIG|2027|2");
   await assertSql("SELECT anno, prossimo FROM roma_rta_private.tessere_progressivi ORDER BY anno;", "2026|503\n2027|2");
   await assertSql("SET ROLE anon; SELECT id FROM public.drive_test_isolamento;", "1");
   console.log("Contatori indipendenti, occupazione, rollover Europe/Rome, ricevute immutabili e permessi verificati.");
+  console.log("Condivisione ricevute: isolamento, autorizzazioni, scadenza, reinvio e revoca verificati.");
 } finally {
   await sql("DROP DATABASE " + database + ";", "postgres");
 }

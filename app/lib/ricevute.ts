@@ -85,11 +85,15 @@ export function importoInLettere(importo: number) {
 
 const dataItaliana = (data: string | null) => data ? data.split("-").reverse().join("/") : "—";
 
-export async function creaPdfRicevuta(dati: DatiRicevuta, emessa?: Ricevuta) {
-  const [{ default: jsPDF }, logo] = await Promise.all([import("jspdf"), fetch(associazione.logoRta)]);
+async function caricaLogoRicevuta() {
+  const logo = await fetch(associazione.logoRta);
   if (!logo.ok) throw new Error("Logo ROMA R.T.A. non disponibile. Riprova.");
+  return new Uint8Array(await logo.arrayBuffer());
+}
+
+export async function creaPdfRicevuta(dati: DatiRicevuta, emessa?: Ricevuta, logo?: Uint8Array) {
+  const [{ default: jsPDF }, immagine] = await Promise.all([import("jspdf"), logo ?? caricaLogoRicevuta()]);
   const pdf = new jsPDF();
-  const immagine = new Uint8Array(await logo.arrayBuffer());
   const dimensioni = pdf.getImageProperties(immagine);
   const blu = "#123b77";
   const larghezzaLogo = Math.min(23, 36 * dimensioni.width / dimensioni.height);

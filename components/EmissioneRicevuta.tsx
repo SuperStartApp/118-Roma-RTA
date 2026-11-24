@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import DocumentoRicevuta from "./DocumentoRicevuta";
+import InviaRicevutaWhatsApp from "./InviaRicevutaWhatsApp";
 import { supabase } from "@/app/lib/supabase";
 import { causaliRicevuta, creaPdfRicevuta, type EmittenteRicevuta, type Ricevuta } from "@/app/lib/ricevute";
 import { formattaImporto } from "@/app/lib/stato-prenotazione";
 
-export default function EmissioneRicevuta({ id, emettibile, importo, metodo, dataServizio, intestatario }: {
+export default function EmissioneRicevuta({ id, emettibile, importo, metodo, dataServizio, intestatario, telefonoProposto }: {
   id: string; emettibile: boolean; importo: number; metodo: string | null; dataServizio: string; intestatario: string;
+  telefonoProposto?: string | null;
 }) {
   const [ricevuta, setRicevuta] = useState<Ricevuta | null>(null);
   type Config = { emissione_attiva: boolean; serie: string; emittente: EmittenteRicevuta };
@@ -101,7 +103,10 @@ export default function EmissioneRicevuta({ id, emettibile, importo, metodo, dat
       <h2 className="font-bold text-slate-900">Ricevuta</h2>
       <Link href="/ricevute" className="text-sm font-semibold text-blue-800 underline">Archivio ricevute</Link>
     </div>
-    {ricevuta ? <DocumentoRicevuta ricevuta={ricevuta} /> : emettibile && config && (aperta
+    {ricevuta ? <>
+      <DocumentoRicevuta ricevuta={ricevuta} />
+      <InviaRicevutaWhatsApp key={ricevuta.id} id={ricevuta.id} telefonoProposto={telefonoProposto} />
+    </> : emettibile && config && (aperta
       ? <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void generaAnteprima(); }}>
         <fieldset disabled={occupato} className="grid gap-2 sm:grid-cols-2">
           {campi.map(([campo, titolo, limite, tipo]) => <label key={campo} className="space-y-1 text-sm font-semibold">
