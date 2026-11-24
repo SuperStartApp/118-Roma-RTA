@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { Loader2, LogOut, ShieldCheck } from "lucide-react";
 import { supabase } from "@/app/lib/supabase";
 import { creaAccessoCentrale, type StatoAccesso } from "@/app/lib/accesso-centrale";
-import AutistaLogin from "@/app/(centrale)/autista/page";
+import AutistaLogin from "@/app/(autista)/autista/page";
 
 type Accesso = StatoAccesso & {
   accedi: (email: string, password: string) => Promise<void>;
@@ -57,7 +57,7 @@ export function LoginCentrale() {
             </button>
           </form>
         )}
-        <p className="mt-5 text-xs leading-relaxed text-slate-500">Gli account sono abilitati dall’amministratore. Per assistenza o recupero dell’accesso contatta la centrale.</p>
+        <p className="mt-5 text-xs leading-relaxed text-slate-500">Gli account sono abilitati dallâ€™amministratore. Per assistenza o recupero dellâ€™accesso contatta la centrale.</p>
       </section>
     </div>
   );
@@ -70,7 +70,7 @@ export function PulsanteLogout() {
 
 export default function AccessoCentrale({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [accesso, setAccesso] = useState<StatoAccesso>({ stato: "verifica", messaggio: "Verifica accesso alla centrale…" });
+  const [accesso, setAccesso] = useState<StatoAccesso>({ stato: "verifica", messaggio: "Verifica accesso alla centraleâ€¦" });
   const controllo = useRef<ReturnType<typeof creaAccessoCentrale> | null>(null);
 
   useEffect(() => {
