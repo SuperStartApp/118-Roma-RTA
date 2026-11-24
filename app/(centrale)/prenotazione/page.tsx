@@ -251,7 +251,7 @@ Le confermiamo la prenotazione del servizio:
 📅 *Data servizio:* ${dataFormatted}
 ⏰ *Orario convocazione:* ore ${formData.ora_appuntamento}
 
-📍 *Ritiro:* ${formData.partenza_via} ${formData.partenza_civico || ""}, ${formData.partenza_citta}
+📍 *Partenza:* ${formData.partenza_via} ${formData.partenza_civico || ""}, ${formData.partenza_citta}
 🏥 *Destinazione:* ${formData.arrivo_via} ${formData.arrivo_civico || ""}, ${formData.arrivo_citta}
 ${formData.costo ? `💶 *Importo concordato:* ${formData.costo} €` : ""}
 
